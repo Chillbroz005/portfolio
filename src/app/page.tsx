@@ -107,7 +107,7 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [showTop, setShowTop] = useState(false);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
-  const [repoStatus, setRepoStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [repoStatus, setRepoStatus] = useState<"loading" | "ready" | "fallback">("loading");
 
   // Editable state
   const [isEditor, setIsEditor] = useState(false);
@@ -186,7 +186,24 @@ export default function Home() {
         setRepoStatus("ready");
       })
       .catch(() => {
-        if (!controller.signal.aborted) setRepoStatus("error");
+        if (controller.signal.aborted) return;
+
+        // Keep featured, verified repository links visible if GitHub's API is
+        // unavailable or rate-limited for a visitor.
+        const fallbackRepos = defaultProjects
+          .filter(project => project.github)
+          .map((project, index) => ({
+            id: -(index + 1),
+            name: project.github.split("/").filter(Boolean).pop() || project.title,
+            html_url: project.github,
+            description: project.description,
+            language: project.technologies[0] || null,
+            stargazers_count: 0,
+            updated_at: "",
+            fork: false
+          }));
+        setRepos(fallbackRepos);
+        setRepoStatus("fallback");
       });
     return () => controller.abort();
   }, [profileData.githubUsername]);
@@ -861,8 +878,8 @@ export default function Home() {
           </a>
         </div>
         {repoStatus === "loading" && <div className="bento-card" style={{ textAlign: "center", color: "var(--muted)" }}>Loading public repositories…</div>}
-        {repoStatus === "error" && <div className="bento-card" style={{ textAlign: "center", color: "var(--muted)" }}>GitHub repository data could not be loaded right now.</div>}
-        {repoStatus === "ready" && (
+        {repoStatus === "fallback" && <div className="bento-card" style={{ textAlign: "center", color: "var(--muted)", marginBottom: "1rem" }}>Live GitHub data is unavailable; showing featured repositories.</div>}
+        {(repoStatus === "ready" || repoStatus === "fallback") && (
           <div className="repo-grid">
             {repos.length ? repos.map(r => (
               <a className="repo-card" href={r.html_url} target="_blank" rel="noreferrer" key={r.id}>
@@ -874,7 +891,7 @@ export default function Home() {
                   <h3>{r.name}</h3>
                   <p>{r.description || "No public description supplied."}</p>
                 </div>
-                <small style={{ color: "var(--muted)", fontSize: "12px" }}>★ {r.stargazers_count} · Updated {new Date(r.updated_at).toLocaleDateString()}</small>
+                <small style={{ color: "var(--muted)", fontSize: "12px" }}>★ {r.stargazers_count}{r.updated_at ? ` · Updated ${new Date(r.updated_at).toLocaleDateString()}` : " · Featured project"}</small>
               </a>
             )) : (
               <div className="bento-card" style={{ gridColumn: "1/-1", textAlign: "center", color: "var(--muted)" }}>No public repositories were returned by the GitHub API.</div>
