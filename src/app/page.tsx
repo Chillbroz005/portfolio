@@ -711,12 +711,13 @@ export default function Home() {
     try {
       const repoOwner = "Chillbroz005";
       const repoName = "portfolio";
-      const updatedCode = `export const profile = ${JSON.stringify(profileData, null, 2)} as const;\n\nexport type ExperienceItem = {\n  company: string;\n  role: string;\n  location: string;\n  dates: string;\n  startDate: string;\n  endDate: string | null;\n  bullets: string[];\n};\n\nexport const experience: ExperienceItem[] = ${JSON.stringify(expList, null, 2)};\n\nexport const engagements = ${JSON.stringify(engagementList, null, 2)};\n\nexport const skills = ${JSON.stringify(skillsList, null, 2)};\n\nexport const software = ${JSON.stringify(softwareList, null, 2)};\n\nexport const tools = ${JSON.stringify(toolsList, null, 2)};\n\nexport const education = ${JSON.stringify(educationList, null, 2)};\n\nexport const certifications = ${JSON.stringify(certificationList, null, 2)};\n\nexport const projects = ${JSON.stringify(projectList, null, 2)};\n`;
+      const profileForPublish = selectedPhoto ? { ...profileData, profilePhotoVersion: Date.now() } : profileData;
+      const updatedCode = `export const profile = ${JSON.stringify(profileForPublish, null, 2)} as const;\n\nexport type ExperienceItem = {\n  company: string;\n  role: string;\n  location: string;\n  dates: string;\n  startDate: string;\n  endDate: string | null;\n  bullets: string[];\n};\n\nexport const experience: ExperienceItem[] = ${JSON.stringify(expList, null, 2)};\n\nexport const engagements = ${JSON.stringify(engagementList, null, 2)};\n\nexport const skills = ${JSON.stringify(skillsList, null, 2)};\n\nexport const software = ${JSON.stringify(softwareList, null, 2)};\n\nexport const tools = ${JSON.stringify(toolsList, null, 2)};\n\nexport const education = ${JSON.stringify(educationList, null, 2)};\n\nexport const certifications = ${JSON.stringify(certificationList, null, 2)};\n\nexport const projects = ${JSON.stringify(projectList, null, 2)};\n`;
       const photoData = selectedPhoto
         ? await pngDataFromBlob(selectedPhoto)
         : await loadCurrentPhotoData();
       const resumeBytes = await generateResumePdf({
-        profile: profileData,
+        profile: profileForPublish,
         experience: expList,
         skills: skillsList,
         software: softwareList,
@@ -770,6 +771,19 @@ export default function Home() {
         parents: [branchRef.object.sha]
       });
       await apiRequest("git/refs/heads/main", "PATCH", { sha: commit.sha, force: false });
+
+      setProfileData(profileForPublish);
+      try {
+        localStorage.setItem("sg_edited_profile", JSON.stringify(profileForPublish));
+        localStorage.setItem("sg_edited_experience", JSON.stringify(expList));
+        localStorage.setItem("sg_edited_skills", JSON.stringify(skillsList));
+        localStorage.setItem("sg_edited_software", JSON.stringify(softwareList));
+        localStorage.setItem("sg_edited_tools", JSON.stringify(toolsList));
+        localStorage.setItem("sg_edited_engagements", JSON.stringify(engagementList));
+        localStorage.setItem("sg_edited_education", JSON.stringify(educationList));
+        localStorage.setItem("sg_edited_certifications", JSON.stringify(certificationList));
+        localStorage.setItem("sg_edited_projects", JSON.stringify(projectList));
+      } catch {}
 
       setPushStatus("success");
       setPushMessage(`Published the profile and matching resume${selectedPhoto ? ", including your new photo" : ""} in one GitHub commit. The live site will update after GitHub Pages finishes building.`);
@@ -1027,7 +1041,7 @@ export default function Home() {
           </div>
 
           <div className="bento-card hero-sidebar">
-            <img className="profile-photo" src={photoPreview || `${BASE}/profile-photo.png`} alt={`${profileData.name} professional portrait`} loading="eager" />
+            <img className="profile-photo" src={photoPreview || `${BASE}/profile-photo.png?v=${profileData.profilePhotoVersion || "1"}`} alt={`${profileData.name} professional portrait`} loading="eager" />
             {isEditor && (
               <div className="editor-photo-upload">
                 <label htmlFor="profile-photo-upload">Replace profile photo</label>

@@ -8,6 +8,7 @@ export type ResumePayload = {
     email?: string;
     phones?: string[];
     linkedin?: string;
+    github?: string;
     regions?: string[];
     industries?: string[];
     functions?: string[];
@@ -37,10 +38,33 @@ function printable(value: unknown): string {
     .replace(/[’‘]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/…/g, "...")
-    .replace(/•/g, "-")
     .replace(/[^\x20-\x7e]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+async function makeRoundPhoto(dataUrl: string): Promise<string> {
+  if (!dataUrl) return "";
+  const blob = await (await fetch(dataUrl)).blob();
+  const bitmap = await createImageBitmap(blob);
+  const size = 480;
+  const side = Math.min(bitmap.width, bitmap.height);
+  const sx = (bitmap.width - side) / 2;
+  const sy = (bitmap.height - side) / 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    bitmap.close();
+    throw new Error("Your browser could not prepare the resume photo.");
+  }
+  context.beginPath();
+  context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  context.clip();
+  context.drawImage(bitmap, sx, sy, side, side, 0, 0, size, size);
+  bitmap.close();
+  return canvas.toDataURL("image/png");
 }
 
 export async function generateResumePdf(data: ResumePayload, photoDataUrl: string): Promise<Uint8Array> {
@@ -48,143 +72,240 @@ export async function generateResumePdf(data: ResumePayload, photoDataUrl: strin
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 42;
-  const textWidth = pageWidth - margin * 2;
-  let y = 0;
+  const sidebarWidth = 190;
+  const mainLeft = 214;
+  const mainRight = pageWidth - 26;
+  const mainWidth = mainRight - mainLeft;
+  const sidebarLeft = 20;
+  const sidebarWidthContent = sidebarWidth - sidebarLeft - 15;
+  const bottom = pageHeight - 32;
+  const roundPhoto = await makeRoundPhoto(photoDataUrl);
 
-  const ensureSpace = (height: number) => {
-    if (y + height > pageHeight - 42) {
-      doc.addPage();
-      y = 42;
-    }
+  const drawSidebarBase = () => {
+    doc.setFillColor(11, 27, 51);
+    doc.rect(0, 0, sidebarWidth, pageHeight, "F");
+    doc.setFillColor(0, 194, 218);
+    doc.rect(sidebarWidth, 0, 3, pageHeight, "F");
   };
 
-  const addText = (value: unknown, options: { size?: number; bold?: boolean; color?: [number, number, number]; indent?: number; after?: number } = {}) => {
+  const sideText = (value: unknown, options: { bold?: boolean; color?: [number, number, number]; size?: number; gap?: number } = {}) => {
     const text = printable(value);
     if (!text) return;
-    const { size = 9.5, bold = false, color = [43, 54, 67], indent = 0, after = 3 } = options;
+    const { bold = false, color = [218, 228, 240], size = 8.4, gap = 2 } = options;
     doc.setFont("helvetica", bold ? "bold" : "normal");
     doc.setFontSize(size);
     doc.setTextColor(...color);
-    const lines = doc.splitTextToSize(text, textWidth - indent) as string[];
+    const lines = doc.splitTextToSize(text, sidebarWidthContent) as string[];
     const lineHeight = size * 1.35;
     lines.forEach(line => {
-      ensureSpace(lineHeight);
-      doc.text(line, margin + indent, y);
-      y += lineHeight;
+      doc.text(line, sidebarLeft, sideY);
+      sideY += lineHeight;
     });
-    y += after;
+    sideY += gap;
   };
 
-  const addSection = (title: string) => {
-    ensureSpace(34);
-    y += 7;
+  let sideY = 0;
+  const sideSection = (title: string) => {
+    sideY += 9;
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10.5);
-    doc.setTextColor(0, 155, 177);
-    doc.text(printable(title).toUpperCase(), margin, y);
-    y += 5;
-    doc.setDrawColor(0, 190, 210);
-    doc.setLineWidth(0.8);
-    doc.line(margin, y, pageWidth - margin, y);
-    y += 15;
+    doc.setFontSize(9.7);
+    doc.setTextColor(0, 211, 231);
+    doc.text(printable(title).toUpperCase(), sidebarLeft, sideY);
+    sideY += 4;
+    doc.setDrawColor(0, 211, 231);
+    doc.setLineWidth(1.4);
+    doc.line(sidebarLeft, sideY, sidebarLeft + 21, sideY);
+    sideY += 12;
   };
 
-  // Branded first page header, with the same portrait used on the website.
-  doc.setFillColor(8, 20, 35);
-  doc.rect(0, 0, pageWidth, 124, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(21);
-  const nameLines = doc.splitTextToSize(printable(data.profile.name || "Professional Profile"), 390) as string[];
-  doc.text(nameLines.slice(0, 2), margin, 40);
-  const titleY = 45 + Math.max(0, nameLines.length - 1) * 21;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10.5);
-  doc.setTextColor(86, 220, 231);
-  const titleLines = doc.splitTextToSize(printable(data.profile.title), 390) as string[];
-  doc.text(titleLines.slice(0, 2), margin, titleY);
-  const contactItems = [data.profile.location, data.profile.email, ...(data.profile.phones || []), data.profile.linkedin]
-    .map(printable)
-    .filter(Boolean);
-  doc.setFontSize(8.5);
-  doc.setTextColor(220, 230, 239);
-  const contactLines = doc.splitTextToSize(contactItems.join(" | "), 390) as string[];
-  doc.text(contactLines.slice(0, 2), margin, 96);
-  try {
-    if (photoDataUrl) doc.addImage(photoDataUrl, "PNG", pageWidth - margin - 66, 28, 66, 66, undefined, "FAST");
-  } catch {
-    // The resume remains usable if a browser cannot decode the optional portrait.
-  }
-  y = 145;
-
-  addSection("Professional Summary");
-  addText(data.profile.summary || data.profile.tagline, { size: 9.5, after: 4 });
-
-  if (data.skills.length || data.software.length || data.tools.length) {
-    addSection("Core Expertise");
-    if (data.skills.length) addText(`Competencies: ${data.skills.join(", ")}`);
-    if (data.software.length) addText(`Software: ${data.software.join(", ")}`);
-    if (data.tools.length) addText(`Tools and platforms: ${data.tools.join(", ")}`);
-  }
-
-  if (data.experience.length) {
-    addSection("Professional Experience");
-    data.experience.forEach(item => {
-      addText(`${item.role} | ${item.dates}`, { size: 10, bold: true, color: [22, 36, 51], after: 2 });
-      addText(`${item.company} | ${item.location}`, { size: 9, color: [87, 101, 116], after: 3 });
-      item.bullets.filter(Boolean).forEach(bullet => addText(`- ${bullet}`, { size: 9, indent: 9, after: 1 }));
-      y += 5;
+  const sideChips = (items: string[]) => {
+    const fontSize = 7.3;
+    const chipHeight = 15;
+    const horizontalGap = 4;
+    const verticalGap = 4;
+    let x = sidebarLeft;
+    let y = sideY;
+    let rowHeight = chipHeight;
+    items.map(printable).filter(Boolean).forEach(item => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(fontSize);
+      const lines = doc.splitTextToSize(item, sidebarWidthContent - 12) as string[];
+      const width = Math.min(sidebarWidthContent, Math.max(...lines.map(line => doc.getTextWidth(line))) + 12);
+      const itemHeight = Math.max(chipHeight, lines.length * fontSize * 1.15 + 5);
+      if (x > sidebarLeft && x + width > sidebarLeft + sidebarWidthContent) {
+        x = sidebarLeft;
+        y += rowHeight + verticalGap;
+        rowHeight = chipHeight;
+      }
+      doc.setFillColor(23, 45, 79);
+      doc.setDrawColor(44, 76, 122);
+      doc.setLineWidth(0.65);
+      doc.roundedRect(x, y, width, itemHeight, 6, 6, "FD");
+      doc.setTextColor(238, 244, 250);
+      lines.forEach((line, lineIndex) => doc.text(line, x + 6, y + 9.8 + lineIndex * fontSize * 1.15));
+      rowHeight = Math.max(rowHeight, itemHeight);
+      x += width + horizontalGap;
     });
-  }
+    sideY = y + (items.length ? rowHeight + 2 : 0);
+  };
 
-  if (data.projects.length) {
-    addSection("Selected Projects");
-    data.projects.forEach(project => {
-      addText(`${project.title}${project.category ? ` | ${project.category}` : ""}`, { size: 10, bold: true, after: 2 });
-      addText(project.description, { after: 2 });
-      if (project.technologies.length) addText(`Tools and methods: ${project.technologies.join(", ")}`, { size: 8.5, color: [87, 101, 116] });
-      if (project.github) addText(project.github, { size: 8, color: [0, 128, 155], after: 4 });
+  const sideBullet = (value: string, bold = false) => {
+    const text = printable(value);
+    if (!text) return;
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(8.2);
+    doc.setTextColor(220, 230, 240);
+    const lines = doc.splitTextToSize(text, sidebarWidthContent - 9) as string[];
+    doc.setFillColor(0, 211, 231);
+    doc.circle(sidebarLeft + 1.8, sideY - 2.8, 1.2, "F");
+    lines.forEach((line, index) => {
+      if (index > 0) sideY += 11.1;
+      doc.text(line, sidebarLeft + 9, sideY);
     });
-  }
+    sideY += 13;
+  };
 
-  if (data.engagements.length) {
-    addSection("Project Engagements");
-    data.engagements.forEach(item => addText(`- ${item}`, { indent: 9, after: 1 }));
-  }
+  const drawFirstSidebar = () => {
+    drawSidebarBase();
+    if (roundPhoto) {
+      doc.addImage(roundPhoto, "PNG", 39, 31, 112, 112, undefined, "FAST");
+      doc.setDrawColor(0, 211, 231);
+      doc.setLineWidth(2.5);
+      doc.circle(95, 87, 56, "S");
+    }
+    sideY = 169;
+    sideSection("Contact");
+    sideText(data.profile.email);
+    (data.profile.phones || []).forEach(phone => sideText(phone));
+    sideText(data.profile.location);
+    sideText("LinkedIn     GitHub", { bold: true, color: [0, 211, 231], gap: 4 });
 
-  if (data.education.length) {
-    addSection("Education");
+    sideSection("Core Skills");
+    sideChips(data.skills);
+    sideSection("Software");
+    sideChips(data.software);
+    sideSection("Tools");
+    sideChips(data.tools);
+  };
+
+  const drawSecondSidebar = () => {
+    drawSidebarBase();
+    sideY = 49;
+    sideSection("Education");
     data.education.forEach(item => {
-      addText(`${item.degree} | ${item.year}`, { size: 9.5, bold: true, after: 1 });
-      addText(`${item.institution}${item.detail ? ` | ${item.detail}` : ""}`, { after: 3 });
+      sideBullet(item.degree, true);
+      sideText(item.institution, { gap: 0 });
+      sideText(`${item.year}${item.detail ? ` | ${item.detail}` : ""}`, { gap: 5 });
     });
-  }
 
-  if (data.certifications.length) {
-    addSection("Certifications");
-    addText(data.certifications.join(" | "));
-  }
+    if (data.certifications.length) {
+      sideSection("Certifications");
+      data.certifications.forEach(item => sideBullet(item));
+    }
 
-  if (data.profile.achievements?.length) {
-    addSection("Achievements and Recognition");
-    data.profile.achievements.forEach(item => addText(`- ${item}`, { indent: 9, after: 1 }));
-  }
+    if (data.profile.achievements?.length) {
+      sideSection("Achievements");
+      data.profile.achievements.forEach(item => sideBullet(item));
+    }
 
-  if (data.profile.regions?.length || data.profile.industries?.length || data.profile.functions?.length) {
-    addSection("Industry and Global Experience");
-    if (data.profile.industries?.length) addText(`Industries: ${data.profile.industries.join(", ")}`);
-    if (data.profile.functions?.length) addText(`Functions: ${data.profile.functions.join(", ")}`);
-    if (data.profile.regions?.length) addText(`Regions: ${data.profile.regions.join(", ")}`);
-  }
+    if (data.profile.regions?.length) {
+      sideSection("Global Reach");
+      sideText(data.profile.regions.join(", "));
+    }
+  };
 
-  const totalPages = doc.getNumberOfPages();
-  for (let page = 1; page <= totalPages; page++) {
-    doc.setPage(page);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(115, 127, 140);
-    doc.text(`${printable(data.profile.name)} | ${page} / ${totalPages}`, pageWidth - margin, pageHeight - 20, { align: "right" });
+  drawFirstSidebar();
+  doc.addPage();
+  drawSecondSidebar();
+  doc.setPage(1);
+
+  let mainY = 0;
+  let mainPage = 1;
+  const nextMainPage = () => {
+    mainPage += 1;
+    if (mainPage > doc.getNumberOfPages()) {
+      doc.addPage();
+      drawSecondSidebar();
+    }
+    doc.setPage(mainPage);
+    mainY = 43;
+  };
+  const ensureMainSpace = (height: number) => {
+    if (mainY + height > bottom) nextMainPage();
+  };
+  const mainText = (value: unknown, options: { size?: number; bold?: boolean; color?: [number, number, number]; indent?: number; after?: number } = {}) => {
+    const text = printable(value);
+    if (!text) return;
+    const { size = 8.7, bold = false, color = [36, 51, 73], indent = 0, after = 2.4 } = options;
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    doc.setTextColor(...color);
+    const lines = doc.splitTextToSize(text, mainWidth - indent) as string[];
+    const lineHeight = size * 1.31;
+    lines.forEach(line => {
+      ensureMainSpace(lineHeight);
+      doc.text(line, mainLeft + indent, mainY);
+      mainY += lineHeight;
+    });
+    mainY += after;
+  };
+  const mainSection = (title: string) => {
+    ensureMainSpace(32);
+    mainY += 5;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10.2);
+    doc.setTextColor(20, 37, 62);
+    doc.text(printable(title).toUpperCase(), mainLeft, mainY);
+    mainY += 3;
+    doc.setDrawColor(0, 194, 218);
+    doc.setLineWidth(1.25);
+    doc.line(mainLeft, mainY, mainLeft + 24, mainY);
+    mainY += 14;
+  };
+  const mainBullet = (value: string, options: { bold?: boolean; after?: number } = {}) => {
+    const text = printable(value);
+    if (!text) return;
+    doc.setFillColor(29, 50, 77);
+    ensureMainSpace(12);
+    doc.circle(mainLeft + 2, mainY - 2.6, 1.15, "F");
+    mainText(text, { size: 8.55, bold: options.bold, indent: 10, after: options.after ?? 2 });
+  };
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(24);
+  doc.setTextColor(12, 29, 54);
+  doc.text(doc.splitTextToSize(printable(data.profile.name || "Professional Profile"), mainWidth) as string[], mainLeft, 48);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10.7);
+  doc.setTextColor(0, 130, 168);
+  doc.text(doc.splitTextToSize(printable(data.profile.title).toUpperCase(), mainWidth) as string[], mainLeft, 67);
+  doc.setDrawColor(0, 194, 218);
+  doc.setLineWidth(3);
+  doc.line(mainLeft, 76, mainLeft + 60, 76);
+  mainY = 98;
+
+  mainSection("Career Objective");
+  mainText(data.profile.tagline || data.profile.summary, { size: 8.7, after: 5 });
+  mainSection("Experience");
+
+  data.experience.forEach(item => {
+    ensureMainSpace(38);
+    doc.setFillColor(0, 194, 218);
+    doc.circle(mainLeft - 8, mainY - 3, 3, "F");
+    mainText(item.company, { size: 9.6, bold: true, color: [17, 36, 65], after: 1 });
+    mainText(item.role, { size: 9, bold: true, color: [0, 130, 168], after: 1 });
+    mainText(`${item.dates}${item.location ? ` | ${item.location}` : ""}`, { size: 8, color: [94, 108, 127], after: 3 });
+    item.bullets.filter(Boolean).forEach(bullet => mainBullet(bullet, { after: 1.5 }));
+    mainY += 4;
+  });
+
+  if (data.engagements.length || data.projects.length) {
+    mainSection("Key Engagements");
+    data.engagements.forEach(item => mainBullet(item, { after: 2 }));
+    data.projects.forEach(project => {
+      const details = [project.title, project.category, project.description].filter(Boolean).join(" - ");
+      mainBullet(details, { after: 2 });
+    });
   }
 
   return new Uint8Array(doc.output("arraybuffer"));
