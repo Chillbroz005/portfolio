@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowUpRight, ChevronDown, Download, ExternalLink, Github,
   Linkedin, Mail, MapPin, Menu, Moon, Phone, Send, Sun, X,
-  Edit3, Save, Plus, Trash2, Key, CheckCircle, AlertCircle, RefreshCw, Sparkles, Lock, Unlock, UserRound
+  Edit3, Save, Plus, Trash2, Key, CheckCircle, AlertCircle, RefreshCw, Sparkles, Lock, Unlock, UserRound, Settings
 } from "lucide-react";
 import {
   profile as defaultProfile,
@@ -124,6 +124,11 @@ export default function Home() {
   const [profileData, setProfileData] = useState<any>(defaultProfile);
   const [expList, setExpList] = useState<ExperienceItem[]>(defaultExperience);
   const [skillsList, setSkillsList] = useState<string[]>([...defaultSkills]);
+  const [softwareList, setSoftwareList] = useState<string[]>([...defaultSoftware]);
+  const [toolsList, setToolsList] = useState<string[]>([...defaultTools]);
+  const [newSkill, setNewSkill] = useState("");
+  const [newSoftware, setNewSoftware] = useState("");
+  const [newTool, setNewTool] = useState("");
 
   // Auth & Token Security states
   const [authKeyInput, setAuthKeyInput] = useState("");
@@ -158,6 +163,15 @@ export default function Home() {
 
       const savedExp = localStorage.getItem("sg_edited_experience");
       if (savedExp) setExpList(JSON.parse(savedExp));
+
+      const savedSkills = localStorage.getItem("sg_edited_skills");
+      if (savedSkills) setSkillsList(JSON.parse(savedSkills));
+
+      const savedSoftware = localStorage.getItem("sg_edited_software");
+      if (savedSoftware) setSoftwareList(JSON.parse(savedSoftware));
+
+      const savedTools = localStorage.getItem("sg_edited_tools");
+      if (savedTools) setToolsList(JSON.parse(savedTools));
 
       const savedToken = localStorage.getItem("sg_github_token");
       if (savedToken) setGithubToken(savedToken);
@@ -257,11 +271,26 @@ export default function Home() {
     }
   };
 
+  const addListItem = (
+    value: string,
+    items: string[],
+    updateItems: (nextItems: string[]) => void,
+    clearInput: () => void
+  ) => {
+    const item = value.trim();
+    if (!item || items.some(existing => existing.toLowerCase() === item.toLowerCase())) return;
+    updateItems([...items, item]);
+    clearInput();
+  };
+
   // Save changes locally
   const saveLocalChanges = () => {
     try {
       localStorage.setItem("sg_edited_profile", JSON.stringify(profileData));
       localStorage.setItem("sg_edited_experience", JSON.stringify(expList));
+      localStorage.setItem("sg_edited_skills", JSON.stringify(skillsList));
+      localStorage.setItem("sg_edited_software", JSON.stringify(softwareList));
+      localStorage.setItem("sg_edited_tools", JSON.stringify(toolsList));
       alert("✅ Changes saved to your browser! Click 'Push to GitHub' to publish them live.");
     } catch (e) {
       alert("Error saving locally.");
@@ -314,7 +343,7 @@ export default function Home() {
       const currentSha = fileData.sha;
 
       // 2. Generate updated TS code
-      const updatedCode = `export const profile = ${JSON.stringify(profileData, null, 2)} as const;\n\nexport type ExperienceItem = {\n  company: string;\n  role: string;\n  location: string;\n  dates: string;\n  startDate: string;\n  endDate: string | null;\n  bullets: string[];\n};\n\nexport const experience: ExperienceItem[] = ${JSON.stringify(expList, null, 2)};\n\nexport const engagements = ${JSON.stringify(defaultEngagements, null, 2)};\n\nexport const skills = ${JSON.stringify(skillsList, null, 2)};\n\nexport const software = ${JSON.stringify(defaultSoftware, null, 2)};\n\nexport const tools = ${JSON.stringify(defaultTools, null, 2)};\n\nexport const education = ${JSON.stringify(defaultEducation, null, 2)};\n\nexport const certifications = ${JSON.stringify(defaultCertifications, null, 2)};\n\nexport const projects = ${JSON.stringify(defaultProjects, null, 2)};\n`;
+      const updatedCode = `export const profile = ${JSON.stringify(profileData, null, 2)} as const;\n\nexport type ExperienceItem = {\n  company: string;\n  role: string;\n  location: string;\n  dates: string;\n  startDate: string;\n  endDate: string | null;\n  bullets: string[];\n};\n\nexport const experience: ExperienceItem[] = ${JSON.stringify(expList, null, 2)};\n\nexport const engagements = ${JSON.stringify(defaultEngagements, null, 2)};\n\nexport const skills = ${JSON.stringify(skillsList, null, 2)};\n\nexport const software = ${JSON.stringify(softwareList, null, 2)};\n\nexport const tools = ${JSON.stringify(toolsList, null, 2)};\n\nexport const education = ${JSON.stringify(defaultEducation, null, 2)};\n\nexport const certifications = ${JSON.stringify(defaultCertifications, null, 2)};\n\nexport const projects = ${JSON.stringify(defaultProjects, null, 2)};\n`;
 
       // 3. Encode to base64
       const utf8Bytes = new TextEncoder().encode(updatedCode);
@@ -406,6 +435,14 @@ export default function Home() {
           >
             <UserRound className="recruiterBtn-icon" size={15} />
             <span className="recruiterBtn-label">30-Second Profile</span>
+          </button>
+          <button
+            className="editor-settings-btn"
+            onClick={() => setShowTokenModal(true)}
+            aria-label="Open editor settings"
+            title="Editor settings"
+          >
+            <Settings size={16} />
           </button>
           <button className="mobileOnly" onClick={() => setMobile(!mobile)} aria-label="Open mobile navigation">
             {mobile ? <X size={20} /> : <Menu size={20} />}
@@ -832,27 +869,75 @@ export default function Home() {
                   {s}
                   {isEditor && (
                     <button
+                      type="button"
                       onClick={() => setSkillsList(skillsList.filter((_, i) => i !== idx))}
+                      aria-label={`Remove competency ${s}`}
                       style={{ marginLeft: "6px", color: "#ef4444" }}
                     >
-                      ×
+                      <X size={13} />
                     </button>
                   )}
                 </span>
               ))}
             </div>
+            {isEditor && (
+              <form
+                className="editor-list-add"
+                onSubmit={event => {
+                  event.preventDefault();
+                  addListItem(newSkill, skillsList, setSkillsList, () => setNewSkill(""));
+                }}
+              >
+                <input value={newSkill} onChange={event => setNewSkill(event.target.value)} placeholder="Add a competency" aria-label="New competency" />
+                <button className="secondary-btn" type="submit"><Plus size={15} /> Add</button>
+              </form>
+            )}
           </div>
           <div className="bento-card col-6" style={{ gridColumn: "span 6" }}>
             <span className="eyebrow">Software Systems</span>
             <div className="pill-cloud" style={{ marginTop: "1.25rem" }}>
-              {defaultSoftware.map(s => <span key={s} style={{ background: "var(--surface-soft)" }}>💻 {s}</span>)}
+              {softwareList.map((software, idx) => (
+                <span key={`${software}-${idx}`} style={{ background: "var(--surface-soft)" }}>
+                  💻 {software}
+                  {isEditor && <button type="button" onClick={() => setSoftwareList(softwareList.filter((_, i) => i !== idx))} aria-label={`Remove software ${software}`} style={{ marginLeft: "6px", color: "#ef4444" }}><X size={13} /></button>}
+                </span>
+              ))}
             </div>
+            {isEditor && (
+              <form
+                className="editor-list-add"
+                onSubmit={event => {
+                  event.preventDefault();
+                  addListItem(newSoftware, softwareList, setSoftwareList, () => setNewSoftware(""));
+                }}
+              >
+                <input value={newSoftware} onChange={event => setNewSoftware(event.target.value)} placeholder="Add software" aria-label="New software" />
+                <button className="secondary-btn" type="submit"><Plus size={15} /> Add</button>
+              </form>
+            )}
           </div>
           <div className="bento-card col-6" style={{ gridColumn: "span 6" }}>
             <span className="eyebrow">Tools & Platforms</span>
             <div className="pill-cloud" style={{ marginTop: "1.25rem" }}>
-              {defaultTools.map(t => <span key={t} style={{ background: "var(--surface-soft)" }}>🛠️ {t}</span>)}
+              {toolsList.map((tool, idx) => (
+                <span key={`${tool}-${idx}`} style={{ background: "var(--surface-soft)" }}>
+                  🛠️ {tool}
+                  {isEditor && <button type="button" onClick={() => setToolsList(toolsList.filter((_, i) => i !== idx))} aria-label={`Remove tool ${tool}`} style={{ marginLeft: "6px", color: "#ef4444" }}><X size={13} /></button>}
+                </span>
+              ))}
             </div>
+            {isEditor && (
+              <form
+                className="editor-list-add"
+                onSubmit={event => {
+                  event.preventDefault();
+                  addListItem(newTool, toolsList, setToolsList, () => setNewTool(""));
+                }}
+              >
+                <input value={newTool} onChange={event => setNewTool(event.target.value)} placeholder="Add a tool or platform" aria-label="New tool or platform" />
+                <button className="secondary-btn" type="submit"><Plus size={15} /> Add</button>
+              </form>
+            )}
           </div>
         </div>
       </Section>
@@ -1054,6 +1139,17 @@ export default function Home() {
                   onKeyDown={e => e.key === "Enter" && handleAuthSubmit()}
                   onChange={e => setAuthKeyInput(e.target.value)}
                 />
+                <button
+                  className="forgot-key-link"
+                  type="button"
+                  onClick={() => {
+                    setAuthKeyInput("");
+                    setShowAuthModal(false);
+                    setShowTokenModal(true);
+                  }}
+                >
+                  Forgot your admin key? Open settings
+                </button>
               </div>
               <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
                 <button className="secondary-btn" onClick={() => setShowAuthModal(false)}>Cancel</button>
