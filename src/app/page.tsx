@@ -33,6 +33,14 @@ const nav = [
 ];
 
 const projectFilters = ["All", "Procurement", "Automation", "Android", "Other"];
+const themeOptions = [
+  { value: "obsidian", label: "Obsidian Cyan" },
+  { value: "evergreen", label: "Evergreen" },
+  { value: "amber", label: "Amber Copper" },
+  { value: "violet", label: "Violet Rose" },
+  { value: "polar", label: "Polar Blue" }
+] as const;
+type ThemeStyle = typeof themeOptions[number]["value"];
 
 type GithubRepo = {
   id: number;
@@ -100,6 +108,8 @@ function calculateTotalExperience(experiences: ExperienceItem[]): string {
 
 export default function Home() {
   const [dark, setDark] = useState(true);
+  const [themeStyle, setThemeStyle] = useState<ThemeStyle>("obsidian");
+  const [themePreferencesLoaded, setThemePreferencesLoaded] = useState(false);
   const [mobile, setMobile] = useState(false);
   const [recruiter, setRecruiter] = useState(false);
   const [filter, setFilter] = useState("All");
@@ -126,6 +136,20 @@ export default function Home() {
   const [pushStatus, setPushStatus] = useState<"idle" | "pushing" | "success" | "error">("idle");
   const [pushMessage, setPushMessage] = useState("");
 
+  // Restore the visitor's appearance preferences before saving new selections.
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem("suresh-theme");
+      if (savedTheme === "dark" || savedTheme === "light") setDark(savedTheme === "dark");
+
+      const savedStyle = localStorage.getItem("suresh-theme-style");
+      if (themeOptions.some(option => option.value === savedStyle)) {
+        setThemeStyle(savedStyle as ThemeStyle);
+      }
+    } catch {}
+    setThemePreferencesLoaded(true);
+  }, []);
+
   // Load saved local edits, token, and auth key
   useEffect(() => {
     try {
@@ -148,16 +172,16 @@ export default function Home() {
   }, [expList]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
-    try { localStorage.setItem("suresh-theme", dark ? "dark" : "light"); } catch {}
-  }, [dark]);
+    const root = document.documentElement;
+    root.dataset.theme = dark ? "dark" : "light";
+    root.dataset.themeStyle = themeStyle;
 
-  useEffect(() => {
+    if (!themePreferencesLoaded) return;
     try {
-      const saved = localStorage.getItem("suresh-theme");
-      if (saved) setDark(saved !== "light");
+      localStorage.setItem("suresh-theme", dark ? "dark" : "light");
+      localStorage.setItem("suresh-theme-style", themeStyle);
     } catch {}
-  }, []);
+  }, [dark, themeStyle, themePreferencesLoaded]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -347,20 +371,32 @@ export default function Home() {
           <button onClick={() => setDark(!dark)} aria-label="Toggle dark and light mode">
             {dark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
+          <select
+            className="theme-select"
+            value={themeStyle}
+            onChange={e => setThemeStyle(e.target.value as ThemeStyle)}
+            aria-label="Choose website color theme"
+          >
+            {themeOptions.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
           <button
             onClick={handleEditModeToggle}
+            aria-label={isEditor ? "Exit editor" : "Enter edit mode"}
             style={{
               display: "flex",
               alignItems: "center",
               gap: "6px",
               background: isEditor ? "var(--accent)" : "var(--panel)",
-              color: isEditor ? "#050b14" : "var(--accent)",
+              color: isEditor ? "var(--on-accent)" : "var(--accent)",
               fontWeight: 800,
               fontSize: "13px",
               borderColor: "var(--accent)"
             }}
           >
-            {isEditor ? <Unlock size={15} /> : <Lock size={15} />} {isEditor ? "Exit Editor" : "Edit Mode"}
+            {isEditor ? <Unlock size={15} /> : <Lock size={15} />}
+            <span className="editor-toggle-label">{isEditor ? "Exit Editor" : "Edit Mode"}</span>
           </button>
           <button className="recruiterBtn" onClick={() => setRecruiter(true)}>
             30-Second Profile
@@ -382,7 +418,7 @@ export default function Home() {
               position: "sticky",
               top: "80px",
               zIndex: 45,
-              background: "linear-gradient(135deg, rgba(16, 28, 48, 0.95), rgba(5, 11, 20, 0.95))",
+              background: "linear-gradient(135deg, var(--panel-hover), var(--bg))",
               backdropFilter: "blur(20px)",
               borderBottom: "1px solid var(--accent)",
               padding: "12px 5vw",
@@ -409,7 +445,7 @@ export default function Home() {
                   alignItems: "center",
                   gap: "6px",
                   padding: "8px 14px",
-                  background: "rgba(0, 229, 255, 0.1)",
+                  background: "var(--accent-soft)",
                   border: "1px solid var(--accent)",
                   borderRadius: "10px",
                   color: "var(--accent)",
@@ -446,7 +482,7 @@ export default function Home() {
                   background: "linear-gradient(135deg, var(--accent), var(--accent2))",
                   border: 0,
                   borderRadius: "10px",
-                  color: "#050b14",
+                  color: "var(--on-accent)",
                   fontSize: "13px",
                   fontWeight: 800
                 }}
@@ -478,7 +514,7 @@ export default function Home() {
       {pushStatus !== "idle" && (
         <div style={{
           padding: "16px 5vw",
-          background: pushStatus === "success" ? "rgba(16, 185, 129, 0.2)" : pushStatus === "error" ? "rgba(239, 68, 68, 0.2)" : "rgba(0, 229, 255, 0.2)",
+          background: pushStatus === "success" ? "rgba(16, 185, 129, 0.2)" : pushStatus === "error" ? "rgba(239, 68, 68, 0.2)" : "var(--accent-soft)",
           borderBottom: "1px solid var(--line)",
           display: "flex",
           justifyContent: "space-between",
@@ -530,9 +566,6 @@ export default function Home() {
             </div>
             <div>
               <div className="hero-btns">
-                <a className="primary-btn" href={`${BASE}/resume.pdf`} download>
-                  <Download size={17} /> Download Resume
-                </a>
                 <a className="secondary-btn" href="#projects">
                   View Projects <ArrowUpRight size={17} />
                 </a>
@@ -568,7 +601,7 @@ export default function Home() {
             </div>
 
             {/* TOTAL EXPERIENCE IN YEARS & MONTHS */}
-            <div className="profile-stat" style={{ background: "rgba(0, 229, 255, 0.05)", padding: "12px", borderRadius: "12px", margin: "6px 0", border: "1px solid rgba(0, 229, 255, 0.2)" }}>
+            <div className="profile-stat" style={{ background: "var(--accent-soft)", padding: "12px", borderRadius: "12px", margin: "6px 0", border: "1px solid var(--line)" }}>
               <span style={{ color: "var(--accent)" }}>Total Experience</span>
               <strong style={{ color: "var(--accent)", fontSize: "15px" }}>{totalExperienceFormatted}</strong>
             </div>
@@ -679,7 +712,7 @@ export default function Home() {
                           }}
                         />
                         <button
-                          style={{ fontSize: "11px", color: "var(--accent)", background: "rgba(0, 229, 255, 0.05)", border: "1px solid var(--line)", padding: "2px 8px", borderRadius: "4px" }}
+                          style={{ fontSize: "11px", color: "var(--accent)", background: "var(--accent-soft)", border: "1px solid var(--line)", padding: "2px 8px", borderRadius: "4px" }}
                           onClick={() => {
                             const updated = [...expList];
                             updated[i].endDate = null;
@@ -806,13 +839,13 @@ export default function Home() {
           <div className="bento-card col-6" style={{ gridColumn: "span 6" }}>
             <span className="eyebrow">Software Systems</span>
             <div className="pill-cloud" style={{ marginTop: "1.25rem" }}>
-              {defaultSoftware.map(s => <span key={s} style={{ background: "rgba(99, 102, 241, 0.05)" }}>💻 {s}</span>)}
+              {defaultSoftware.map(s => <span key={s} style={{ background: "var(--surface-soft)" }}>💻 {s}</span>)}
             </div>
           </div>
           <div className="bento-card col-6" style={{ gridColumn: "span 6" }}>
             <span className="eyebrow">Tools & Platforms</span>
             <div className="pill-cloud" style={{ marginTop: "1.25rem" }}>
-              {defaultTools.map(t => <span key={t} style={{ background: "rgba(16, 185, 129, 0.05)" }}>🛠️ {t}</span>)}
+              {defaultTools.map(t => <span key={t} style={{ background: "var(--surface-soft)" }}>🛠️ {t}</span>)}
             </div>
           </div>
         </div>
@@ -920,7 +953,7 @@ export default function Home() {
             <span className="eyebrow">Certifications</span>
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1.5rem" }}>
               {defaultCertifications.map(c => (
-                <div key={c} style={{ padding: "1.25rem", background: "rgba(255,255,255,0.02)", border: "1px solid var(--line)", borderRadius: "14px", fontWeight: 700 }}>
+                <div key={c} style={{ padding: "1.25rem", background: "var(--surface-soft)", border: "1px solid var(--line)", borderRadius: "14px", fontWeight: 700 }}>
                   🏆 {c}
                 </div>
               ))}
@@ -1037,7 +1070,7 @@ export default function Home() {
               <h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px 0" }}>Security Settings & Keys</h2>
 
               {/* GitHub PAT Storage Description */}
-              <div style={{ padding: "12px", background: "rgba(0, 229, 255, 0.05)", borderRadius: "12px", border: "1px solid rgba(0, 229, 255, 0.2)", fontSize: "13px", lineHeight: 1.5, marginBottom: "1.5rem" }}>
+              <div style={{ padding: "12px", background: "var(--accent-soft)", borderRadius: "12px", border: "1px solid var(--line)", fontSize: "13px", lineHeight: 1.5, marginBottom: "1.5rem" }}>
                 💡 <strong>Persistent Token Security:</strong> You only need to paste your GitHub Access Token <strong>once</strong>. The browser saves it securely in your device's <code>localStorage</code>, so you don't have to copy-paste it every time you edit!
               </div>
 
