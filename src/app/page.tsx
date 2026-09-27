@@ -174,17 +174,20 @@ export default function Home() {
     const controller = new AbortController();
     fetch(`https://api.github.com/users/${profileData.githubUsername || defaultProfile.githubUsername}/repos?sort=updated&per_page=6`, {
       signal: controller.signal,
-      headers: { Accept: "vnd.github+json" }
+      headers: { Accept: "application/vnd.github+json" }
     })
       .then(r => {
         if (!r.ok) throw new Error("GitHub API unavailable");
         return r.json();
       })
       .then((data: GithubRepo[]) => {
+        if (controller.signal.aborted) return;
         setRepos(data.filter(r => !r.fork));
         setRepoStatus("ready");
       })
-      .catch(() => setRepoStatus("error"));
+      .catch(() => {
+        if (!controller.signal.aborted) setRepoStatus("error");
+      });
     return () => controller.abort();
   }, [profileData.githubUsername]);
 
