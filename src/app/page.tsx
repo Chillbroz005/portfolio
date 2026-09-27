@@ -58,6 +58,102 @@ type RecoveryQuestion = {
   answerHash: string;
 };
 
+type EncryptedRecoveryBackup = {
+  version: 1;
+  iv: string;
+  ciphertext: string;
+};
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index++) binary += String.fromCharCode(bytes[index]);
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value.replace(/\s/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function generateRecoveryCode(): string {
+  return bytesToBase64(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+async function encryptRecoveryBackup(questions: RecoveryQuestion[], recoveryCode: string): Promise<EncryptedRecoveryBackup> {
+  const key = await crypto.subtle.importKey("raw", toArrayBuffer(base64ToBytes(recoveryCode)), { name: "AES-GCM" }, false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify({ questions }));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: toArrayBuffer(iv) }, key, toArrayBuffer(plaintext));
+  return { version: 1, iv: bytesToBase64(iv), ciphertext: bytesToBase64(new Uint8Array(ciphertext)) };
+}
+
+async function decryptRecoveryBackup(backup: EncryptedRecoveryBackup, recoveryCode: string): Promise<RecoveryQuestion[]> {
+  if (backup.version !== 1 || !backup.iv || !backup.ciphertext) throw new Error("The recovery backup has an unsupported format.");
+  const key = await crypto.subtle.importKey("raw", toArrayBuffer(base64ToBytes(recoveryCode)), { name: "AES-GCM" }, false, ["decrypt"]);
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toArrayBuffer(base64ToBytes(backup.iv)) }, key, toArrayBuffer(base64ToBytes(backup.ciphertext)));
+  const data = JSON.parse(new TextDecoder().decode(plaintext));
+  if (!Array.isArray(data.questions) || data.questions.length === 0 || data.questions.length > 2) {
+    throw new Error("The recovery backup does not contain valid questions.");
+  }
+  if (!data.questions.every((item: any) => item && typeof item.question === "string" && typeof item.answerHash === "string")) {
+    throw new Error("The recovery backup is incomplete.");
+  }
+  return data.questions;
+}
+
+async function uploadRecoveryBackup(backup: EncryptedRecoveryBackup, token: string): Promise<void> {
+  const path = "public/admin-recovery.enc.json";
+  const url = `https://api.github.com/repos/Chillbroz005/portfolio/contents/${path}`;
+  const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" };
+  const currentResponse = await fetch(url, { headers });
+  let sha: string | undefined;
+  if (currentResponse.ok) {
+    const currentFile = await currentResponse.json();
+    sha = currentFile.sha;
+  } else if (currentResponse.status !== 404) {
+    throw new Error(`Could not check the recovery backup (${currentResponse.status}).`);
+  }
+
+  const content = JSON.stringify(backup, null, 2);
+  const encodedContent = bytesToBase64(new TextEncoder().encode(content));
+  const updateResponse = await fetch(url, {
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: "Update encrypted admin recovery backup",
+      content: encodedContent,
+      ...(sha ? { sha } : {}),
+      branch: "main"
+    })
+  });
+  if (!updateResponse.ok) {
+    const error = await updateResponse.json().catch(() => ({}));
+    throw new Error(error.message || `Could not save the encrypted recovery backup (${updateResponse.status}).`);
+  }
+}
+
+async function fetchRecoveryBackup(): Promise<EncryptedRecoveryBackup> {
+  const response = await fetch("https://api.github.com/repos/Chillbroz005/portfolio/contents/public/admin-recovery.enc.json", {
+    headers: { Accept: "application/vnd.github+json" },
+    cache: "no-store"
+  });
+  if (!response.ok) throw new Error(response.status === 404 ? "No cross-browser recovery backup has been published yet." : `Could not load the recovery backup (${response.status}).`);
+  const file = await response.json();
+  const parsed = JSON.parse(new TextDecoder().decode(base64ToBytes(file.content)));
+  if (!parsed || parsed.version !== 1 || typeof parsed.iv !== "string" || typeof parsed.ciphertext !== "string") {
+    throw new Error("The recovery backup file is invalid.");
+  }
+  return parsed as EncryptedRecoveryBackup;
+}
+
 async function hashRecoveryAnswer(answer: string): Promise<string> {
   const normalized = answer.trim().replace(/\s+/g, " ").toLowerCase();
   const bytes = new TextEncoder().encode(normalized);
@@ -149,6 +245,12 @@ export default function Home() {
   const [githubToken, setGithubToken] = useState("");
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [recoveryQuestions, setRecoveryQuestions] = useState<RecoveryQuestion[]>([]);
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [recoveryCodeVisible, setRecoveryCodeVisible] = useState(false);
+  const [recoveryCodeInput, setRecoveryCodeInput] = useState("");
+  const [recoveryCodeUnlocked, setRecoveryCodeUnlocked] = useState(false);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryLoadError, setRecoveryLoadError] = useState("");
   const [recoveryQuestion1, setRecoveryQuestion1] = useState("");
   const [recoveryAnswer1, setRecoveryAnswer1] = useState("");
   const [recoveryQuestion2, setRecoveryQuestion2] = useState("");
@@ -211,6 +313,9 @@ export default function Home() {
           setRecoveryQuestion2(parsed[1]?.question || "");
         }
       }
+
+      const savedRecoveryCode = localStorage.getItem("sg_recovery_code");
+      if (savedRecoveryCode) setRecoveryCode(savedRecoveryCode);
     } catch {}
   }, []);
 
@@ -306,11 +411,39 @@ export default function Home() {
 
   const openRecoveryModal = () => {
     setRecoveryAnswers(Array(recoveryQuestions.length).fill(""));
+    setRecoveryCodeInput(recoveryCode);
+    setRecoveryCodeUnlocked(false);
+    setRecoveryLoadError("");
     setRecoveryVerified(false);
     setRecoveryNewKey("");
     setRecoveryConfirmKey("");
     setRecoveryError("");
     setShowRecoveryModal(true);
+  };
+
+  const loadRecoveryQuestions = async () => {
+    const code = recoveryCodeInput.trim();
+    if (!code) {
+      setRecoveryLoadError("Enter the recovery code saved when you configured these questions.");
+      return;
+    }
+
+    setRecoveryLoading(true);
+    setRecoveryLoadError("");
+    try {
+      const backup = await fetchRecoveryBackup();
+      const questions = await decryptRecoveryBackup(backup, code);
+      setRecoveryQuestions(questions);
+      setRecoveryQuestion1(questions[0]?.question || "");
+      setRecoveryQuestion2(questions[1]?.question || "");
+      setRecoveryAnswers(Array(questions.length).fill(""));
+      setRecoveryCode(code);
+      setRecoveryCodeUnlocked(true);
+    } catch (error: any) {
+      setRecoveryLoadError(error?.name === "OperationError" ? "That recovery code did not unlock the backup." : error.message || "Could not load the recovery backup.");
+    } finally {
+      setRecoveryLoading(false);
+    }
   };
 
   const verifyRecoveryAnswers = async () => {
@@ -328,7 +461,7 @@ export default function Home() {
       if (matches.every(Boolean)) {
         setRecoveryVerified(true);
       } else {
-        setRecoveryError("Those answers do not match the recovery details saved in this browser.");
+        setRecoveryError("Those answers do not match the configured recovery details.");
       }
     } catch {
       setRecoveryError("This browser could not verify the recovery answers. Try the latest version of a modern browser.");
@@ -347,6 +480,11 @@ export default function Home() {
 
     try {
       localStorage.setItem("sg_auth_key", recoveryNewKey);
+      if (recoveryCodeUnlocked) {
+        localStorage.setItem("sg_recovery_questions", JSON.stringify(recoveryQuestions));
+        localStorage.setItem("sg_recovery_code", recoveryCodeInput.trim());
+        setRecoveryCode(recoveryCodeInput.trim());
+      }
       setSavedAuthKey(recoveryNewKey);
       setShowRecoveryModal(false);
       alert("Admin key updated in this browser.");
@@ -357,6 +495,8 @@ export default function Home() {
 
   const saveEditorSettings = async () => {
     const configured: RecoveryQuestion[] = [];
+    let code = recoveryCode;
+    let generatedCode = false;
     const questionDrafts = [
       { question: recoveryQuestion1, answer: recoveryAnswer1, index: 0 },
       { question: recoveryQuestion2, answer: recoveryAnswer2, index: 1 }
@@ -390,16 +530,45 @@ export default function Home() {
         configured.push({ question, answerHash });
       }
 
+      if (configured.length > 0) {
+        if (!code) {
+          code = generateRecoveryCode();
+          generatedCode = true;
+          setRecoveryCode(code);
+          setRecoveryCodeVisible(true);
+        }
+
+        if (githubToken.trim()) {
+          const backup = await encryptRecoveryBackup(configured, code);
+          await uploadRecoveryBackup(backup, githubToken.trim());
+        }
+      }
+
       localStorage.setItem("sg_github_token", githubToken);
       localStorage.setItem("sg_auth_key", savedAuthKey);
       localStorage.setItem("sg_recovery_questions", JSON.stringify(configured));
+      if (code) localStorage.setItem("sg_recovery_code", code);
       setRecoveryQuestions(configured);
+      setRecoveryCode(code);
       setRecoveryAnswer1("");
       setRecoveryAnswer2("");
-      setShowTokenModal(false);
-      alert("Editor settings saved in this browser.");
-    } catch {
-      alert("Could not save editor settings. Check that this browser supports secure recovery answers and local storage.");
+
+      if (configured.length > 0 && !githubToken.trim()) {
+        setRecoveryCodeVisible(true);
+        alert("Saved in this browser only. Add a GitHub token with repository Contents write access, then save again to enable recovery in other browsers.");
+        return;
+      }
+
+      if (!generatedCode) setShowTokenModal(false);
+      if (configured.length > 0) {
+        alert(generatedCode
+          ? "Encrypted recovery backup synced to GitHub. Copy the recovery code shown here and store it outside this browser."
+          : "Editor settings and encrypted recovery backup synced to GitHub.");
+      } else {
+        alert("Editor settings saved in this browser.");
+      }
+    } catch (error: any) {
+      alert(error?.message || "Could not save editor settings. Check browser support and GitHub token permissions.");
     }
   };
 
@@ -1304,14 +1473,24 @@ export default function Home() {
               <span className="eyebrow">ADMIN KEY RECOVERY</span>
               <h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px 0" }}>Forgot your admin key?</h2>
               <p style={{ color: "var(--muted)", fontSize: "13px", lineHeight: 1.6, marginBottom: "1.25rem" }}>
-                Recovery works only in the browser where you configured the questions. It does not provide GitHub access or reset keys on other devices.
+                In a new browser, enter your saved recovery code first, then answer your configured question(s). Recovery does not provide GitHub publishing access.
               </p>
 
-              {recoveryQuestions.length === 0 ? (
-                <p style={{ padding: "14px", background: "var(--accent-soft)", borderRadius: "12px", fontSize: "14px" }}>
-                  No recovery questions are configured in this browser. Set them up in Editor Settings while you are signed in to edit mode.
-                </p>
-              ) : !recoveryVerified ? (
+              {recoveryQuestions.length === 0 && !recoveryCodeUnlocked ? (
+                <div style={{ display: "grid", gap: "12px" }}>
+                  <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>
+                    Recovery code
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }}
+                      value={recoveryCodeInput}
+                      onChange={event => setRecoveryCodeInput(event.target.value)}
+                    />
+                  </label>
+                  {recoveryLoadError && <p role="alert" style={{ color: "#ef4444", fontSize: "13px" }}>{recoveryLoadError}</p>}
+                </div>
+              ) : recoveryQuestions.length > 0 && !recoveryVerified ? (
                 <div style={{ display: "grid", gap: "14px" }}>
                   {recoveryQuestions.map((item, index) => (
                     <label key={`${item.question}-${index}`} style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 700 }}>
@@ -1342,6 +1521,7 @@ export default function Home() {
               {recoveryError && <p role="alert" style={{ color: "#ef4444", fontSize: "13px", marginTop: "12px" }}>{recoveryError}</p>}
               <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "1.5rem" }}>
                 <button className="secondary-btn" onClick={() => setShowRecoveryModal(false)}>Close</button>
+                {recoveryQuestions.length === 0 && !recoveryCodeUnlocked && <button className="primary-btn" disabled={recoveryLoading} onClick={loadRecoveryQuestions}>{recoveryLoading ? "Loading..." : "Load Questions"}</button>}
                 {recoveryQuestions.length > 0 && !recoveryVerified && <button className="primary-btn" onClick={verifyRecoveryAnswers}>Verify Answers</button>}
                 {recoveryVerified && <button className="primary-btn" onClick={resetAdminKey}>Save New Key</button>}
               </div>
@@ -1363,7 +1543,7 @@ export default function Home() {
 
               {/* GitHub PAT Storage Description */}
               <div style={{ padding: "12px", background: "var(--accent-soft)", borderRadius: "12px", border: "1px solid var(--line)", fontSize: "13px", lineHeight: 1.5, marginBottom: "1.5rem" }}>
-                Your GitHub token, admin key, and recovery setup are stored in this browser. Only save a GitHub token on a device you control.
+                Your token and admin key stay in this browser. The recovery backup is encrypted before it is committed to the public repository. Save the recovery code somewhere outside this browser.
               </div>
 
               <div style={{ display: "grid", gap: "15px", marginBottom: "1.5rem" }}>
@@ -1393,7 +1573,7 @@ export default function Home() {
                   <div>
                     <strong style={{ fontSize: "14px" }}>Forgot key recovery</strong>
                     <p style={{ color: "var(--muted)", fontSize: "12px", lineHeight: 1.5, margin: "4px 0 0" }}>
-                      Configure one or two questions. Use answers you can remember; leave an existing answer blank to keep it. Answers are saved only in this browser.
+                      Configure one or two questions. Leave an existing answer blank to keep it. A GitHub token with repository Contents write access is needed to sync the encrypted backup across browsers.
                     </p>
                   </div>
                   <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
@@ -1412,6 +1592,41 @@ export default function Home() {
                     Answer 2 {recoveryQuestions[1]?.question === recoveryQuestion2 && "(leave blank to keep saved answer)"}
                     <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryAnswer2} onChange={event => setRecoveryAnswer2(event.target.value)} />
                   </label>
+                  <div style={{ display: "grid", gap: "8px", borderTop: "1px solid var(--line)", paddingTop: "14px" }}>
+                    <strong style={{ fontSize: "14px" }}>Cross-browser recovery code</strong>
+                    <p style={{ color: "var(--muted)", fontSize: "12px", lineHeight: 1.5, margin: 0 }}>
+                      Keep this code in a password manager. You will need it with your answers to recover from another browser.
+                    </p>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      <input
+                        type={recoveryCodeVisible ? "text" : "password"}
+                        readOnly
+                        aria-label="Cross-browser recovery code"
+                        style={{ flex: "1 1 260px", minWidth: 0, padding: "10px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }}
+                        value={recoveryCode}
+                        placeholder="Generated when you save recovery questions"
+                      />
+                      <button className="secondary-btn" type="button" disabled={!recoveryCode} onClick={() => setRecoveryCodeVisible(value => !value)}>
+                        {recoveryCodeVisible ? "Hide" : "Reveal"}
+                      </button>
+                      <button
+                        className="secondary-btn"
+                        type="button"
+                        disabled={!recoveryCode}
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(recoveryCode);
+                            alert("Recovery code copied. Store it somewhere outside this browser.");
+                          } catch {
+                            setRecoveryCodeVisible(true);
+                            alert("Copy the revealed recovery code and store it somewhere outside this browser.");
+                          }
+                        }}
+                      >
+                        Copy Code
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
