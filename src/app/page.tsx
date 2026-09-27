@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowUpRight, ChevronDown, Download, ExternalLink, Github,
   Linkedin, Mail, MapPin, Menu, Moon, Phone, Send, Sun, X,
-  Edit3, Save, Plus, Trash2, Key, CheckCircle, AlertCircle, RefreshCw, Sparkles, Lock, Unlock
+  Edit3, Save, Plus, Trash2, Key, CheckCircle, AlertCircle, RefreshCw, Sparkles, Lock, Unlock, UserRound
 } from "lucide-react";
 import {
   profile as defaultProfile,
@@ -398,8 +398,14 @@ export default function Home() {
             {isEditor ? <Unlock size={15} /> : <Lock size={15} />}
             <span className="editor-toggle-label">{isEditor ? "Exit Editor" : "Edit Mode"}</span>
           </button>
-          <button className="recruiterBtn" onClick={() => setRecruiter(true)}>
-            30-Second Profile
+          <button
+            className="recruiterBtn"
+            onClick={() => setRecruiter(true)}
+            aria-label="Open 30-Second Profile"
+            title="30-Second Profile"
+          >
+            <UserRound size={15} />
+            <span className="recruiterBtn-label">30-Second Profile</span>
           </button>
           <button className="mobileOnly" onClick={() => setMobile(!mobile)} aria-label="Open mobile navigation">
             {mobile ? <X size={20} /> : <Menu size={20} />}
@@ -1148,7 +1154,12 @@ export default function Home() {
                 </div>
                 <div className="mini-fact">
                   <span>Latest Role</span>
-                  <strong>{expList[0]?.company || ""}</strong>
+                  <strong>{expList[0]?.role || expList[0]?.company || "Not specified"}</strong>
+                  {expList[0]?.role && expList[0]?.company && (
+                    <small style={{ color: "var(--muted)", display: "block", fontSize: "11px", lineHeight: 1.4, marginTop: "4px" }}>
+                      {expList[0].company}
+                    </small>
+                  )}
                 </div>
                 <div className="mini-fact" style={{ gridColumn: "span 2" }}>
                   <span>Global Coverage</span>

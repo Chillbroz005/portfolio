@@ -334,6 +334,10 @@ nav.desktop-nav a:hover {
 }
 
 .recruiterBtn {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   background: linear-gradient(135deg, var(--accent), var(--accent2)) !important;
   color: var(--on-accent) !important;
   border: 0 !important;
@@ -1026,10 +1030,12 @@ footer {
 }
 
 @media(max-width: 768px) {
-  nav.desktop-nav, .recruiterBtn { display: none; }
+  nav.desktop-nav { display: none; }
   .mobileOnly { display: block; }
   .navActions { gap: 6px; }
   .navActions > button, .navActions > select { padding: 7px 8px; }
+  .recruiterBtn { padding: 7px 8px !important; }
+  .recruiterBtn-label { display: none; }
   .theme-select { width: 112px; font-size: 11px; }
   .metrics-grid, .achievements-grid, .repo-grid, .projects-grid { grid-template-columns: 1fr; }
   .fact-subgrid { grid-template-columns: 1fr; }
