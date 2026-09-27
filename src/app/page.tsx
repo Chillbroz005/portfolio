@@ -404,7 +404,7 @@ export default function Home() {
             aria-label="Open 30-Second Profile"
             title="30-Second Profile"
           >
-            <UserRound size={15} />
+            <UserRound className="recruiterBtn-icon" size={15} />
             <span className="recruiterBtn-label">30-Second Profile</span>
           </button>
           <button className="mobileOnly" onClick={() => setMobile(!mobile)} aria-label="Open mobile navigation">
