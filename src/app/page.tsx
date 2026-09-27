@@ -20,6 +20,7 @@ import {
   projects as defaultProjects,
   ExperienceItem
 } from "../data/profile";
+import { generateResumePdf } from "../lib/resume";
 
 const nav = [
   ["about", "About"],
@@ -163,6 +164,39 @@ async function hashRecoveryAnswer(answer: string): Promise<string> {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
+async function pngDataFromBlob(blob: Blob): Promise<{ dataUrl: string; base64: string }> {
+  const bitmap = await createImageBitmap(blob);
+  const maxDimension = 1200;
+  const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) {
+    bitmap.close();
+    throw new Error("Your browser could not prepare the profile photo.");
+  }
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+
+  const optimizedBlob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(result => result ? resolve(result) : reject(new Error("Could not convert the profile photo.")), "image/png");
+  });
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read the converted profile photo."));
+    reader.onerror = () => reject(new Error("Could not read the converted profile photo."));
+    reader.readAsDataURL(optimizedBlob);
+  });
+  return { dataUrl, base64: dataUrl.slice(dataUrl.indexOf(",") + 1) };
+}
+
+async function loadCurrentPhotoData(): Promise<{ dataUrl: string; base64: string }> {
+  const response = await fetch(`${BASE}/profile-photo.png`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Could not load the current profile photo to create the resume.");
+  return pngDataFromBlob(await response.blob());
+}
+
 // Calculates exact duration in Years and Months (for total or per-role)
 function calculateDuration(startDateStr: string, endDateStr: string | null): string {
   if (!startDateStr) return "";
@@ -250,6 +284,9 @@ export default function Home() {
   const [newRegion, setNewRegion] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [newProject, setNewProject] = useState({ title: "", category: "Other", description: "", technologies: "", github: "" });
+  const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [photoError, setPhotoError] = useState("");
 
   // Auth & Token Security states
   const [authKeyInput, setAuthKeyInput] = useState("");
@@ -359,6 +396,16 @@ export default function Home() {
       localStorage.setItem("suresh-theme-style", themeStyle);
     } catch {}
   }, [dark, themeStyle, themePreferencesLoaded]);
+
+  useEffect(() => {
+    if (!selectedPhoto) {
+      setPhotoPreview("");
+      return;
+    }
+    const previewUrl = URL.createObjectURL(selectedPhoto);
+    setPhotoPreview(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [selectedPhoto]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -651,7 +698,7 @@ export default function Home() {
     setOpen(0);
   };
 
-  // Push directly to GitHub via API
+  // Publish the profile, generated resume, and optional replacement photo in one Git commit.
   const pushToGitHub = async () => {
     if (!githubToken) {
       setShowTokenModal(true);
@@ -659,62 +706,73 @@ export default function Home() {
     }
 
     setPushStatus("pushing");
-    setPushMessage("Connecting to GitHub API...");
+    setPushMessage("Preparing your profile, photo, and resume...");
 
     try {
       const repoOwner = "Chillbroz005";
       const repoName = "portfolio";
-      const filePath = "src/data/profile.ts";
-
-      // 1. Get current file sha
-      const getRes = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/contents/${filePath}`, {
-        headers: {
-          Authorization: `Bearer ${githubToken}`,
-          Accept: "application/vnd.github.v3+json"
-        }
-      });
-
-      if (!getRes.ok) {
-        throw new Error(`Failed to fetch current file from GitHub (${getRes.status}). Check token permissions.`);
-      }
-
-      const fileData = await getRes.json();
-      const currentSha = fileData.sha;
-
-      // 2. Generate updated TS code
       const updatedCode = `export const profile = ${JSON.stringify(profileData, null, 2)} as const;\n\nexport type ExperienceItem = {\n  company: string;\n  role: string;\n  location: string;\n  dates: string;\n  startDate: string;\n  endDate: string | null;\n  bullets: string[];\n};\n\nexport const experience: ExperienceItem[] = ${JSON.stringify(expList, null, 2)};\n\nexport const engagements = ${JSON.stringify(engagementList, null, 2)};\n\nexport const skills = ${JSON.stringify(skillsList, null, 2)};\n\nexport const software = ${JSON.stringify(softwareList, null, 2)};\n\nexport const tools = ${JSON.stringify(toolsList, null, 2)};\n\nexport const education = ${JSON.stringify(educationList, null, 2)};\n\nexport const certifications = ${JSON.stringify(certificationList, null, 2)};\n\nexport const projects = ${JSON.stringify(projectList, null, 2)};\n`;
+      const photoData = selectedPhoto
+        ? await pngDataFromBlob(selectedPhoto)
+        : await loadCurrentPhotoData();
+      const resumeBytes = await generateResumePdf({
+        profile: profileData,
+        experience: expList,
+        skills: skillsList,
+        software: softwareList,
+        tools: toolsList,
+        engagements: engagementList,
+        education: educationList,
+        certifications: certificationList,
+        projects: projectList
+      }, photoData.dataUrl);
 
-      // 3. Encode to base64
-      const utf8Bytes = new TextEncoder().encode(updatedCode);
-      let binaryStr = "";
-      for (let i = 0; i < utf8Bytes.length; i++) {
-        binaryStr += String.fromCharCode(utf8Bytes[i]);
-      }
-      const base64Content = btoa(binaryStr);
+      const headers = {
+        Authorization: `Bearer ${githubToken.trim()}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json"
+      };
+      const apiRequest = async (endpoint: string, method = "GET", body?: Record<string, unknown>) => {
+        const response = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/${endpoint}`, {
+          method,
+          headers,
+          ...(body ? { body: JSON.stringify(body) } : {})
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.message || `GitHub request failed (${response.status}). Check the token's Contents write permission.`);
+        return result;
+      };
 
-      // 4. Commit to GitHub
-      const putRes = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/contents/${filePath}`, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${githubToken}`,
-          Accept: "application/vnd.github.v3+json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          message: "Update profile & experience data via Web Editor",
-          content: base64Content,
-          sha: currentSha,
-          branch: "main"
-        })
+      const files: Array<{ path: string; bytes: Uint8Array }> = [
+        { path: "src/data/profile.ts", bytes: new TextEncoder().encode(updatedCode) },
+        { path: "public/resume.pdf", bytes: resumeBytes }
+      ];
+      if (selectedPhoto) files.push({ path: "public/profile-photo.png", bytes: base64ToBytes(photoData.base64) });
+
+      setPushMessage("Uploading the updated files as one GitHub commit...");
+      const branchRef = await apiRequest("git/ref/heads/main");
+      const parentCommit = await apiRequest(`git/commits/${branchRef.object.sha}`);
+      const blobs = await Promise.all(files.map(async file => {
+        const blob = await apiRequest("git/blobs", "POST", {
+          content: bytesToBase64(file.bytes),
+          encoding: "base64"
+        });
+        return { path: file.path, mode: "100644", type: "blob", sha: blob.sha };
+      }));
+      const tree = await apiRequest("git/trees", "POST", {
+        base_tree: parentCommit.tree.sha,
+        tree: blobs
       });
-
-      if (!putRes.ok) {
-        const errData = await putRes.json();
-        throw new Error(errData.message || "Push failed.");
-      }
+      const commit = await apiRequest("git/commits", "POST", {
+        message: "Publish portfolio profile and synchronized resume",
+        tree: tree.sha,
+        parents: [branchRef.object.sha]
+      });
+      await apiRequest("git/refs/heads/main", "PATCH", { sha: commit.sha, force: false });
 
       setPushStatus("success");
-      setPushMessage("🎉 Successfully pushed directly to GitHub repository! Your GitHub Pages build has started and will update in 1-2 minutes.");
+      setPushMessage(`Published the profile and matching resume${selectedPhoto ? ", including your new photo" : ""} in one GitHub commit. The live site will update after GitHub Pages finishes building.`);
     } catch (err: any) {
       setPushStatus("error");
       setPushMessage(`Push failed: ${err.message}`);
@@ -857,6 +915,7 @@ export default function Home() {
               </button>
               <button
                 onClick={pushToGitHub}
+                disabled={pushStatus === "pushing"}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -968,7 +1027,37 @@ export default function Home() {
           </div>
 
           <div className="bento-card hero-sidebar">
-            <img className="profile-photo" src={`${BASE}/profile-photo.png`} alt="Suresh Ganesan professional portrait" loading="eager" />
+            <img className="profile-photo" src={photoPreview || `${BASE}/profile-photo.png`} alt={`${profileData.name} professional portrait`} loading="eager" />
+            {isEditor && (
+              <div className="editor-photo-upload">
+                <label htmlFor="profile-photo-upload">Replace profile photo</label>
+                <input
+                  id="profile-photo-upload"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                  onChange={event => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+                      setPhotoError("Choose a PNG, JPEG, or WebP image.");
+                      setSelectedPhoto(null);
+                      event.target.value = "";
+                      return;
+                    }
+                    if (file.size > 10 * 1024 * 1024) {
+                      setPhotoError("Choose an image smaller than 10 MB.");
+                      setSelectedPhoto(null);
+                      event.target.value = "";
+                      return;
+                    }
+                    setPhotoError("");
+                    setSelectedPhoto(file);
+                  }}
+                />
+                <small>Preview only. The photo and matching resume publish when you click Push to GitHub.</small>
+                {photoError && <span role="alert">{photoError}</span>}
+              </div>
+            )}
 
             <div className="profile-stat">
               <span>Location</span>

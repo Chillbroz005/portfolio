@@ -738,6 +738,39 @@ h2.hero-subtitle {
   outline-offset: 2px;
 }
 
+.editor-photo-upload {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.editor-photo-upload label {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.editor-photo-upload input {
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.editor-photo-upload small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.editor-photo-upload [role="alert"] {
+  color: #ef4444;
+  font-size: 12px;
+}
+
 @media (max-width: 600px) {
   .editor-project-fields {
     grid-template-columns: minmax(0, 1fr);
