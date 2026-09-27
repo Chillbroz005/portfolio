@@ -698,6 +698,56 @@ h2.hero-subtitle {
   outline-offset: 2px;
 }
 
+.editor-project-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.editor-project-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.editor-project-fields input,
+.editor-project-fields textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.editor-project-fields textarea {
+  grid-column: 1 / -1;
+  resize: vertical;
+}
+
+.editor-project-fields input:focus-visible,
+.editor-project-fields textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 600px) {
+  .editor-project-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-project-fields textarea {
+    grid-column: auto;
+  }
+}
+
 .forgot-key-link {
   justify-self: start;
   padding: 2px 0;

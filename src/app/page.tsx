@@ -33,6 +33,8 @@ const nav = [
 ];
 
 const projectFilters = ["All", "Procurement", "Automation", "Android", "Other"];
+type EducationItem = (typeof defaultEducation)[number];
+type ProjectItem = (typeof defaultProjects)[number];
 const themeOptions = [
   { value: "obsidian", label: "Obsidian Cyan" },
   { value: "evergreen", label: "Evergreen" },
@@ -234,9 +236,20 @@ export default function Home() {
   const [skillsList, setSkillsList] = useState<string[]>([...defaultSkills]);
   const [softwareList, setSoftwareList] = useState<string[]>([...defaultSoftware]);
   const [toolsList, setToolsList] = useState<string[]>([...defaultTools]);
+  const [engagementList, setEngagementList] = useState<string[]>([...defaultEngagements]);
+  const [educationList, setEducationList] = useState<EducationItem[]>([...defaultEducation]);
+  const [certificationList, setCertificationList] = useState<string[]>([...defaultCertifications]);
+  const [projectList, setProjectList] = useState<ProjectItem[]>([...defaultProjects]);
   const [newSkill, setNewSkill] = useState("");
   const [newSoftware, setNewSoftware] = useState("");
   const [newTool, setNewTool] = useState("");
+  const [newEngagement, setNewEngagement] = useState("");
+  const [newEducation, setNewEducation] = useState<EducationItem>({ degree: "", institution: "", year: "", detail: "" });
+  const [newCertification, setNewCertification] = useState("");
+  const [newAchievement, setNewAchievement] = useState("");
+  const [newRegion, setNewRegion] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newProject, setNewProject] = useState({ title: "", category: "Other", description: "", technologies: "", github: "" });
 
   // Auth & Token Security states
   const [authKeyInput, setAuthKeyInput] = useState("");
@@ -297,6 +310,18 @@ export default function Home() {
 
       const savedTools = localStorage.getItem("sg_edited_tools");
       if (savedTools) setToolsList(JSON.parse(savedTools));
+
+      const savedEngagements = localStorage.getItem("sg_edited_engagements");
+      if (savedEngagements) setEngagementList(JSON.parse(savedEngagements));
+
+      const savedEducation = localStorage.getItem("sg_edited_education");
+      if (savedEducation) setEducationList(JSON.parse(savedEducation));
+
+      const savedCertifications = localStorage.getItem("sg_edited_certifications");
+      if (savedCertifications) setCertificationList(JSON.parse(savedCertifications));
+
+      const savedProjects = localStorage.getItem("sg_edited_projects");
+      if (savedProjects) setProjectList(JSON.parse(savedProjects));
 
       const savedToken = localStorage.getItem("sg_github_token");
       if (savedToken) setGithubToken(savedToken);
@@ -385,9 +410,14 @@ export default function Home() {
   }, [profileData.githubUsername]);
 
   const filtered = useMemo(() => {
-    if (filter === "All") return defaultProjects;
-    return defaultProjects.filter(p => p.category === filter);
-  }, [filter]);
+    if (filter === "All") return projectList;
+    return projectList.filter(p => p.category === filter);
+  }, [filter, projectList]);
+
+  const availableProjectFilters = useMemo(() => [
+    "All",
+    ...Array.from(new Set([...projectFilters.slice(1), ...projectList.map(project => project.category).filter(Boolean)]))
+  ], [projectList]);
 
   // Handle Edit Mode click
   const handleEditModeToggle = () => {
@@ -584,6 +614,10 @@ export default function Home() {
     clearInput();
   };
 
+  const updateProfileTextList = (key: "achievements" | "regions" | "phones", nextItems: string[]) => {
+    setProfileData({ ...profileData, [key]: nextItems });
+  };
+
   // Save changes locally
   const saveLocalChanges = () => {
     try {
@@ -592,6 +626,10 @@ export default function Home() {
       localStorage.setItem("sg_edited_skills", JSON.stringify(skillsList));
       localStorage.setItem("sg_edited_software", JSON.stringify(softwareList));
       localStorage.setItem("sg_edited_tools", JSON.stringify(toolsList));
+      localStorage.setItem("sg_edited_engagements", JSON.stringify(engagementList));
+      localStorage.setItem("sg_edited_education", JSON.stringify(educationList));
+      localStorage.setItem("sg_edited_certifications", JSON.stringify(certificationList));
+      localStorage.setItem("sg_edited_projects", JSON.stringify(projectList));
       alert("✅ Changes saved to your browser! Click 'Push to GitHub' to publish them live.");
     } catch (e) {
       alert("Error saving locally.");
@@ -644,7 +682,7 @@ export default function Home() {
       const currentSha = fileData.sha;
 
       // 2. Generate updated TS code
-      const updatedCode = `export const profile = ${JSON.stringify(profileData, null, 2)} as const;\n\nexport type ExperienceItem = {\n  company: string;\n  role: string;\n  location: string;\n  dates: string;\n  startDate: string;\n  endDate: string | null;\n  bullets: string[];\n};\n\nexport const experience: ExperienceItem[] = ${JSON.stringify(expList, null, 2)};\n\nexport const engagements = ${JSON.stringify(defaultEngagements, null, 2)};\n\nexport const skills = ${JSON.stringify(skillsList, null, 2)};\n\nexport const software = ${JSON.stringify(softwareList, null, 2)};\n\nexport const tools = ${JSON.stringify(toolsList, null, 2)};\n\nexport const education = ${JSON.stringify(defaultEducation, null, 2)};\n\nexport const certifications = ${JSON.stringify(defaultCertifications, null, 2)};\n\nexport const projects = ${JSON.stringify(defaultProjects, null, 2)};\n`;
+      const updatedCode = `export const profile = ${JSON.stringify(profileData, null, 2)} as const;\n\nexport type ExperienceItem = {\n  company: string;\n  role: string;\n  location: string;\n  dates: string;\n  startDate: string;\n  endDate: string | null;\n  bullets: string[];\n};\n\nexport const experience: ExperienceItem[] = ${JSON.stringify(expList, null, 2)};\n\nexport const engagements = ${JSON.stringify(engagementList, null, 2)};\n\nexport const skills = ${JSON.stringify(skillsList, null, 2)};\n\nexport const software = ${JSON.stringify(softwareList, null, 2)};\n\nexport const tools = ${JSON.stringify(toolsList, null, 2)};\n\nexport const education = ${JSON.stringify(educationList, null, 2)};\n\nexport const certifications = ${JSON.stringify(certificationList, null, 2)};\n\nexport const projects = ${JSON.stringify(projectList, null, 2)};\n`;
 
       // 3. Encode to base64
       const utf8Bytes = new TextEncoder().encode(updatedCode);
@@ -999,6 +1037,13 @@ export default function Home() {
                 <span key={region}>🌍 {region}</span>
               ))}
             </div>
+            {isEditor && <form className="editor-list-add" onSubmit={event => {
+              event.preventDefault();
+              addListItem(newRegion, profileData.regions || [], items => updateProfileTextList("regions", items), () => setNewRegion(""));
+            }}>
+              <input value={newRegion} onChange={event => setNewRegion(event.target.value)} placeholder="Add a region" aria-label="New region" />
+              <button className="secondary-btn" type="submit"><Plus size={15} /> Add region</button>
+            </form>}
           </div>
           <div className="bento-card col-5">
             <span className="eyebrow">Quick Facts</span>
@@ -1251,15 +1296,23 @@ export default function Home() {
             <motion.div className="achievement-bento" key={a} whileHover={{ y: -5 }}>
               <span>0{i + 1} // AWARD</span>
               <p>{a}</p>
+              {isEditor && <button type="button" onClick={() => updateProfileTextList("achievements", profileData.achievements.filter((_: string, index: number) => index !== i))} aria-label={`Remove achievement ${a}`} style={{ color: "#ef4444" }}><Trash2 size={15} /> Remove</button>}
             </motion.div>
           ))}
         </div>
+        {isEditor && <form className="editor-list-add" onSubmit={event => {
+          event.preventDefault();
+          addListItem(newAchievement, profileData.achievements || [], items => updateProfileTextList("achievements", items), () => setNewAchievement(""));
+        }}>
+          <input value={newAchievement} onChange={event => setNewAchievement(event.target.value)} placeholder="Add an achievement or recognition" aria-label="New achievement" />
+          <button className="secondary-btn" type="submit"><Plus size={15} /> Add achievement</button>
+        </form>}
       </Section>
 
       {/* Projects */}
       <Section id="projects" eyebrow="05 / PROJECTS & ENGAGEMENTS" title="Selected project engagements and verified public work.">
         <div className="filter-tabs" role="tablist" aria-label="Project filters">
-          {projectFilters.map(f => (
+          {availableProjectFilters.map(f => (
             <button role="tab" aria-selected={filter === f} className={`filter-tab ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)} key={f}>
               {f}
             </button>
@@ -1267,12 +1320,13 @@ export default function Home() {
         </div>
         <div className="projects-grid">
           {filtered.length ? filtered.map(p => (
-            <article className="project-card" key={p.title}>
+            <article className="project-card" key={`${p.title}-${p.github}`}>
               <div>
                 <div className="project-top">
                   <span>{p.category}</span>
                   <ArrowUpRight size={18} />
                 </div>
+                {isEditor && <button type="button" onClick={() => setProjectList(projectList.filter(project => project !== p))} aria-label={`Remove project ${p.title}`} style={{ float: "right", color: "#ef4444" }}><Trash2 size={15} /> Remove</button>}
                 <h3>{p.title}</h3>
                 <p>{p.description}</p>
                 <div className="project-tags">
@@ -1290,6 +1344,47 @@ export default function Home() {
               No resume-verified project has been documented for this filter yet.
             </div>
           )}
+        </div>
+        {isEditor && <form className="editor-project-form" onSubmit={event => {
+          event.preventDefault();
+          if (!newProject.title.trim() || !newProject.description.trim()) return;
+          setProjectList([...projectList, {
+            title: newProject.title.trim(),
+            category: newProject.category.trim() || "Other",
+            description: newProject.description.trim(),
+            technologies: newProject.technologies.split(",").map(item => item.trim()).filter(Boolean),
+            github: newProject.github.trim()
+          }]);
+          setNewProject({ title: "", category: "Other", description: "", technologies: "", github: "" });
+          setFilter("All");
+        }}>
+          <span className="eyebrow">Add a Project</span>
+          <div className="editor-project-fields">
+            <input value={newProject.title} onChange={event => setNewProject({ ...newProject, title: event.target.value })} placeholder="Project title" aria-label="Project title" required />
+            <input value={newProject.category} onChange={event => setNewProject({ ...newProject, category: event.target.value })} placeholder="Category" aria-label="Project category" />
+            <input value={newProject.github} onChange={event => setNewProject({ ...newProject, github: event.target.value })} placeholder="Project or repository URL (optional)" aria-label="Project URL" type="url" />
+            <input value={newProject.technologies} onChange={event => setNewProject({ ...newProject, technologies: event.target.value })} placeholder="Skills / tools, separated by commas" aria-label="Project technologies" />
+            <textarea value={newProject.description} onChange={event => setNewProject({ ...newProject, description: event.target.value })} placeholder="Short project description" aria-label="Project description" rows={3} required />
+          </div>
+          <button className="secondary-btn" type="submit"><Plus size={15} /> Add project</button>
+        </form>}
+        <div className="bento-card" style={{ marginTop: "1.5rem" }}>
+          <span className="eyebrow">Project Engagements</span>
+          <div style={{ display: "grid", gap: "0.75rem", marginTop: "1rem" }}>
+            {engagementList.map((engagement, index) => (
+              <div key={`${engagement}-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", padding: "0.8rem 1rem", borderRadius: "10px", background: "var(--surface-soft)" }}>
+                <span>{engagement}</span>
+                {isEditor && <button type="button" onClick={() => setEngagementList(engagementList.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove engagement ${engagement}`} style={{ color: "#ef4444", flexShrink: 0 }}><X size={15} /></button>}
+              </div>
+            ))}
+          </div>
+          {isEditor && <form className="editor-list-add" onSubmit={event => {
+            event.preventDefault();
+            addListItem(newEngagement, engagementList, setEngagementList, () => setNewEngagement(""));
+          }}>
+            <input value={newEngagement} onChange={event => setNewEngagement(event.target.value)} placeholder="Add a project engagement" aria-label="New project engagement" />
+            <button className="secondary-btn" type="submit"><Plus size={15} /> Add engagement</button>
+          </form>}
         </div>
       </Section>
 
@@ -1332,25 +1427,49 @@ export default function Home() {
           <div className="bento-card col-7">
             <span className="eyebrow">Academic Background</span>
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", marginTop: "1.5rem" }}>
-              {defaultEducation.map(e => (
-                <div key={e.degree} style={{ paddingBottom: "1.25rem", borderBottom: "1px solid var(--line)" }}>
+              {educationList.map((e, index) => (
+                <div key={`${e.degree}-${index}`} style={{ paddingBottom: "1.25rem", borderBottom: "1px solid var(--line)" }}>
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--accent)" }}>{e.year}</span>
                   <h3 style={{ fontSize: "18px", fontWeight: 800, margin: "4px 0" }}>{e.degree}</h3>
                   <p style={{ color: "var(--muted)", margin: 0, fontSize: "14px" }}>{e.institution}</p>
                   <strong style={{ fontSize: "13px", marginTop: "4px", display: "block" }}>{e.detail}</strong>
+                  {isEditor && <button type="button" onClick={() => setEducationList(educationList.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove education ${e.degree}`} style={{ marginTop: "8px", color: "#ef4444" }}><Trash2 size={14} /> Remove</button>}
                 </div>
               ))}
             </div>
+            {isEditor && <form className="editor-project-form" onSubmit={event => {
+              event.preventDefault();
+              if (!newEducation.degree.trim() || !newEducation.institution.trim()) return;
+              setEducationList([...educationList, { ...newEducation, degree: newEducation.degree.trim(), institution: newEducation.institution.trim(), year: newEducation.year.trim(), detail: newEducation.detail.trim() }]);
+              setNewEducation({ degree: "", institution: "", year: "", detail: "" });
+            }}>
+              <span className="eyebrow">Add Education</span>
+              <div className="editor-project-fields">
+                <input value={newEducation.degree} onChange={event => setNewEducation({ ...newEducation, degree: event.target.value })} placeholder="Degree or qualification" aria-label="Degree or qualification" required />
+                <input value={newEducation.institution} onChange={event => setNewEducation({ ...newEducation, institution: event.target.value })} placeholder="Institution" aria-label="Institution" required />
+                <input value={newEducation.year} onChange={event => setNewEducation({ ...newEducation, year: event.target.value })} placeholder="Year" aria-label="Graduation year" />
+                <input value={newEducation.detail} onChange={event => setNewEducation({ ...newEducation, detail: event.target.value })} placeholder="Grade or additional detail (optional)" aria-label="Education details" />
+              </div>
+              <button className="secondary-btn" type="submit"><Plus size={15} /> Add education</button>
+            </form>}
           </div>
           <div className="bento-card col-5">
             <span className="eyebrow">Certifications</span>
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1.5rem" }}>
-              {defaultCertifications.map(c => (
-                <div key={c} style={{ padding: "1.25rem", background: "var(--surface-soft)", border: "1px solid var(--line)", borderRadius: "14px", fontWeight: 700 }}>
+              {certificationList.map((c, index) => (
+                <div key={`${c}-${index}`} style={{ padding: "1.25rem", background: "var(--surface-soft)", border: "1px solid var(--line)", borderRadius: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem" }}>
+                  {isEditor && <button type="button" onClick={() => setCertificationList(certificationList.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove certification ${c}`} style={{ color: "#ef4444", flexShrink: 0 }}><X size={15} /></button>}
                   🏆 {c}
                 </div>
               ))}
             </div>
+            {isEditor && <form className="editor-list-add" onSubmit={event => {
+              event.preventDefault();
+              addListItem(newCertification, certificationList, setCertificationList, () => setNewCertification(""));
+            }}>
+              <input value={newCertification} onChange={event => setNewCertification(event.target.value)} placeholder="Add a certification" aria-label="New certification" />
+              <button className="secondary-btn" type="submit"><Plus size={15} /> Add certification</button>
+            </form>}
           </div>
         </div>
       </Section>
@@ -1364,11 +1483,19 @@ export default function Home() {
               <span>{profileData.email}</span>
             </a>
             {profileData.phones?.map((p: string) => (
-              <a className="contact-item" href={`tel:${p.replace(/\s/g, "")}`} key={p}>
+              <div className="contact-item" key={p}>
                 <Phone size={20} style={{ color: "var(--accent)" }} />
-                <span>{p}</span>
-              </a>
+                <a href={`tel:${p.replace(/\s/g, "")}`} style={{ color: "inherit" }}><span>{p}</span></a>
+                {isEditor && <button type="button" onClick={() => updateProfileTextList("phones", profileData.phones.filter((phone: string) => phone !== p))} aria-label={`Remove phone ${p}`} style={{ color: "#ef4444", marginLeft: "auto" }}><X size={15} /></button>}
+              </div>
             ))}
+            {isEditor && <form className="editor-list-add" onSubmit={event => {
+              event.preventDefault();
+              addListItem(newPhone, profileData.phones || [], items => updateProfileTextList("phones", items), () => setNewPhone(""));
+            }}>
+              <input value={newPhone} onChange={event => setNewPhone(event.target.value)} placeholder="Add a phone number" aria-label="New phone number" type="tel" />
+              <button className="secondary-btn" type="submit"><Plus size={15} /> Add phone</button>
+            </form>}
             <div className="contact-item">
               <MapPin size={20} style={{ color: "var(--accent)" }} />
               <span>{profileData.location}</span>
