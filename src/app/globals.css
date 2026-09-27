@@ -356,6 +356,18 @@ nav.desktop-nav a:hover {
     min-height: 37px;
     white-space: nowrap;
   }
+
+  .navActions > .editor-toggle-btn {
+    height: 37px;
+    padding: 8px 12px !important;
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 1025px) {
+  nav.desktop-nav {
+    gap: clamp(16px, 1.5vw, 24px);
+  }
 }
 
 .recruiterBtn-icon {

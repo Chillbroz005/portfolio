@@ -543,6 +543,7 @@ export default function Home() {
             ))}
           </select>
           <button
+            className="editor-toggle-btn"
             onClick={handleEditModeToggle}
             aria-label={isEditor ? "Exit editor" : "Enter edit mode"}
             style={{
