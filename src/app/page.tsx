@@ -53,6 +53,18 @@ type GithubRepo = {
   fork: boolean;
 };
 
+type RecoveryQuestion = {
+  question: string;
+  answerHash: string;
+};
+
+async function hashRecoveryAnswer(answer: string): Promise<string> {
+  const normalized = answer.trim().replace(/\s+/g, " ").toLowerCase();
+  const bytes = new TextEncoder().encode(normalized);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 // Calculates exact duration in Years and Months (for total or per-role)
 function calculateDuration(startDateStr: string, endDateStr: string | null): string {
   if (!startDateStr) return "";
@@ -136,6 +148,17 @@ export default function Home() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [githubToken, setGithubToken] = useState("");
   const [showTokenModal, setShowTokenModal] = useState(false);
+  const [recoveryQuestions, setRecoveryQuestions] = useState<RecoveryQuestion[]>([]);
+  const [recoveryQuestion1, setRecoveryQuestion1] = useState("");
+  const [recoveryAnswer1, setRecoveryAnswer1] = useState("");
+  const [recoveryQuestion2, setRecoveryQuestion2] = useState("");
+  const [recoveryAnswer2, setRecoveryAnswer2] = useState("");
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [recoveryAnswers, setRecoveryAnswers] = useState<string[]>([]);
+  const [recoveryVerified, setRecoveryVerified] = useState(false);
+  const [recoveryNewKey, setRecoveryNewKey] = useState("");
+  const [recoveryConfirmKey, setRecoveryConfirmKey] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
 
   // GitHub Push State
   const [pushStatus, setPushStatus] = useState<"idle" | "pushing" | "success" | "error">("idle");
@@ -178,6 +201,16 @@ export default function Home() {
 
       const savedKey = localStorage.getItem("sg_auth_key");
       if (savedKey) setSavedAuthKey(savedKey);
+
+      const savedRecoveryQuestions = localStorage.getItem("sg_recovery_questions");
+      if (savedRecoveryQuestions) {
+        const parsed = JSON.parse(savedRecoveryQuestions);
+        if (Array.isArray(parsed)) {
+          setRecoveryQuestions(parsed.filter(item => item && typeof item.question === "string" && typeof item.answerHash === "string"));
+          setRecoveryQuestion1(parsed[0]?.question || "");
+          setRecoveryQuestion2(parsed[1]?.question || "");
+        }
+      }
     } catch {}
   }, []);
 
@@ -268,6 +301,105 @@ export default function Home() {
       setAuthKeyInput("");
     } else {
       alert("❌ Incorrect Authorization Key!");
+    }
+  };
+
+  const openRecoveryModal = () => {
+    setRecoveryAnswers(Array(recoveryQuestions.length).fill(""));
+    setRecoveryVerified(false);
+    setRecoveryNewKey("");
+    setRecoveryConfirmKey("");
+    setRecoveryError("");
+    setShowRecoveryModal(true);
+  };
+
+  const verifyRecoveryAnswers = async () => {
+    setRecoveryError("");
+    if (recoveryQuestions.length === 0) {
+      setRecoveryError("Recovery questions have not been configured in this browser.");
+      return;
+    }
+
+    try {
+      const matches = await Promise.all(recoveryQuestions.map(async (item, index) => {
+        const answer = recoveryAnswers[index] || "";
+        return Boolean(answer.trim()) && await hashRecoveryAnswer(answer) === item.answerHash;
+      }));
+      if (matches.every(Boolean)) {
+        setRecoveryVerified(true);
+      } else {
+        setRecoveryError("Those answers do not match the recovery details saved in this browser.");
+      }
+    } catch {
+      setRecoveryError("This browser could not verify the recovery answers. Try the latest version of a modern browser.");
+    }
+  };
+
+  const resetAdminKey = () => {
+    if (!recoveryNewKey.trim()) {
+      setRecoveryError("Enter a new admin key.");
+      return;
+    }
+    if (recoveryNewKey !== recoveryConfirmKey) {
+      setRecoveryError("The new keys do not match.");
+      return;
+    }
+
+    try {
+      localStorage.setItem("sg_auth_key", recoveryNewKey);
+      setSavedAuthKey(recoveryNewKey);
+      setShowRecoveryModal(false);
+      alert("Admin key updated in this browser.");
+    } catch {
+      setRecoveryError("Could not save the new key in this browser.");
+    }
+  };
+
+  const saveEditorSettings = async () => {
+    const configured: RecoveryQuestion[] = [];
+    const questionDrafts = [
+      { question: recoveryQuestion1, answer: recoveryAnswer1, index: 0 },
+      { question: recoveryQuestion2, answer: recoveryAnswer2, index: 1 }
+    ];
+
+    try {
+      if (!recoveryQuestion1.trim() && recoveryQuestion2.trim()) {
+        alert("Use question 1 before adding optional question 2.");
+        return;
+      }
+
+      for (const draft of questionDrafts) {
+        const question = draft.question.trim();
+        const answer = draft.answer.trim();
+        if (!question) {
+          if (answer) {
+            alert("Add a question for each recovery answer, or clear that answer.");
+            return;
+          }
+          continue;
+        }
+
+        const existing = recoveryQuestions[draft.index];
+        const answerHash = answer
+          ? await hashRecoveryAnswer(answer)
+          : existing?.question === question ? existing.answerHash : "";
+        if (!answerHash) {
+          alert(`Enter an answer for recovery question ${draft.index + 1}.`);
+          return;
+        }
+        configured.push({ question, answerHash });
+      }
+
+      localStorage.setItem("sg_github_token", githubToken);
+      localStorage.setItem("sg_auth_key", savedAuthKey);
+      localStorage.setItem("sg_recovery_questions", JSON.stringify(configured));
+      setRecoveryQuestions(configured);
+      setRecoveryAnswer1("");
+      setRecoveryAnswer2("");
+      setShowTokenModal(false);
+      alert("Editor settings saved in this browser.");
+    } catch {
+      alert("Could not save editor settings. Check that this browser supports secure recovery answers and local storage.");
     }
   };
 
@@ -438,9 +570,9 @@ export default function Home() {
           </button>
           <button
             className="editor-settings-btn"
-            onClick={() => setShowTokenModal(true)}
-            aria-label="Open editor settings"
-            title="Editor settings"
+            onClick={openRecoveryModal}
+            aria-label="Recover admin key"
+            title="Admin key recovery"
           >
             <Settings size={16} />
           </button>
@@ -546,7 +678,7 @@ export default function Home() {
                   fontSize: "13px"
                 }}
               >
-                <Key size={14} /> Settings & Keys
+                <Key size={14} /> Editor Settings
               </button>
             </div>
           </motion.div>
@@ -1145,10 +1277,10 @@ export default function Home() {
                   onClick={() => {
                     setAuthKeyInput("");
                     setShowAuthModal(false);
-                    setShowTokenModal(true);
+                    openRecoveryModal();
                   }}
                 >
-                  Forgot your admin key? Open settings
+                  Forgot your admin key? Recover it
                 </button>
               </div>
               <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
@@ -1160,20 +1292,77 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* Token & Security Settings Modal */}
+      {/* Admin Key Recovery Modal */}
+      <AnimatePresence>
+        {showRecoveryModal && (
+          <div className="modal-backdrop">
+            <motion.div className="recruiter-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+              <button className="modal-close" onClick={() => setShowRecoveryModal(false)} aria-label="Close recovery dialog">
+                <X size={18} />
+              </button>
+              <span className="eyebrow">ADMIN KEY RECOVERY</span>
+              <h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px 0" }}>Forgot your admin key?</h2>
+              <p style={{ color: "var(--muted)", fontSize: "13px", lineHeight: 1.6, marginBottom: "1.25rem" }}>
+                Recovery works only in the browser where you configured the questions. It does not provide GitHub access or reset keys on other devices.
+              </p>
+
+              {recoveryQuestions.length === 0 ? (
+                <p style={{ padding: "14px", background: "var(--accent-soft)", borderRadius: "12px", fontSize: "14px" }}>
+                  No recovery questions are configured in this browser. Set them up in Editor Settings while you are signed in to edit mode.
+                </p>
+              ) : !recoveryVerified ? (
+                <div style={{ display: "grid", gap: "14px" }}>
+                  {recoveryQuestions.map((item, index) => (
+                    <label key={`${item.question}-${index}`} style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 700 }}>
+                      {item.question}
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }}
+                        value={recoveryAnswers[index] || ""}
+                        onChange={event => setRecoveryAnswers(current => current.map((answer, answerIndex) => answerIndex === index ? event.target.value : answer))}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: "12px" }}>
+                  <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>
+                    New admin key
+                    <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryNewKey} onChange={event => setRecoveryNewKey(event.target.value)} />
+                  </label>
+                  <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>
+                    Confirm new admin key
+                    <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryConfirmKey} onChange={event => setRecoveryConfirmKey(event.target.value)} />
+                  </label>
+                </div>
+              )}
+
+              {recoveryError && <p role="alert" style={{ color: "#ef4444", fontSize: "13px", marginTop: "12px" }}>{recoveryError}</p>}
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "1.5rem" }}>
+                <button className="secondary-btn" onClick={() => setShowRecoveryModal(false)}>Close</button>
+                {recoveryQuestions.length > 0 && !recoveryVerified && <button className="primary-btn" onClick={verifyRecoveryAnswers}>Verify Answers</button>}
+                {recoveryVerified && <button className="primary-btn" onClick={resetAdminKey}>Save New Key</button>}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Editor Settings Modal */}
       <AnimatePresence>
         {showTokenModal && (
           <div className="modal-backdrop">
-            <motion.div className="recruiter-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+            <motion.div className="recruiter-modal editor-settings-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
               <button className="modal-close" onClick={() => setShowTokenModal(false)} aria-label="Close modal">
                 <X size={18} />
               </button>
-              <span className="eyebrow">WEB ADMIN CONFIGURATION</span>
-              <h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px 0" }}>Security Settings & Keys</h2>
+              <span className="eyebrow">EDITOR ONLY</span>
+              <h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px 0" }}>Editor Settings</h2>
 
               {/* GitHub PAT Storage Description */}
               <div style={{ padding: "12px", background: "var(--accent-soft)", borderRadius: "12px", border: "1px solid var(--line)", fontSize: "13px", lineHeight: 1.5, marginBottom: "1.5rem" }}>
-                💡 <strong>Persistent Token Security:</strong> You only need to paste your GitHub Access Token <strong>once</strong>. The browser saves it securely in your device's <code>localStorage</code>, so you don't have to copy-paste it every time you edit!
+                Your GitHub token, admin key, and recovery setup are stored in this browser. Only save a GitHub token on a device you control.
               </div>
 
               <div style={{ display: "grid", gap: "15px", marginBottom: "1.5rem" }}>
@@ -1198,32 +1387,39 @@ export default function Home() {
                     onChange={e => setSavedAuthKey(e.target.value)}
                   />
                 </label>
+
+                <div style={{ display: "grid", gap: "10px", borderTop: "1px solid var(--line)", paddingTop: "14px" }}>
+                  <div>
+                    <strong style={{ fontSize: "14px" }}>Forgot key recovery</strong>
+                    <p style={{ color: "var(--muted)", fontSize: "12px", lineHeight: 1.5, margin: "4px 0 0" }}>
+                      Configure one or two questions. Use answers you can remember; leave an existing answer blank to keep it. Answers are saved only in this browser.
+                    </p>
+                  </div>
+                  <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
+                    Recovery question 1
+                    <input type="text" autoComplete="off" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryQuestion1} placeholder="Example: What was your childhood nickname?" onChange={event => setRecoveryQuestion1(event.target.value)} />
+                  </label>
+                  <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
+                    Answer 1 {recoveryQuestions[0]?.question === recoveryQuestion1 && "(leave blank to keep saved answer)"}
+                    <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryAnswer1} onChange={event => setRecoveryAnswer1(event.target.value)} />
+                  </label>
+                  <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
+                    Recovery question 2 (optional)
+                    <input type="text" autoComplete="off" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryQuestion2} placeholder="Example: What was the name of your first pet?" onChange={event => setRecoveryQuestion2(event.target.value)} />
+                  </label>
+                  <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
+                    Answer 2 {recoveryQuestions[1]?.question === recoveryQuestion2 && "(leave blank to keep saved answer)"}
+                    <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryAnswer2} onChange={event => setRecoveryAnswer2(event.target.value)} />
+                  </label>
+                </div>
               </div>
 
               <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-                <button
-                  className="secondary-btn"
-                  onClick={() => {
-                    localStorage.removeItem("sg_github_token");
-                    localStorage.removeItem("sg_auth_key");
-                    setGithubToken("");
-                    setSavedAuthKey("SureshAdmin123");
-                    setShowTokenModal(false);
-                    alert("Settings cleared.");
-                  }}
-                >
-                  Reset Defaults
+                <button className="secondary-btn" onClick={() => setShowTokenModal(false)}>
+                  Cancel
                 </button>
-                <button
-                  className="primary-btn"
-                  onClick={() => {
-                    localStorage.setItem("sg_github_token", githubToken);
-                    localStorage.setItem("sg_auth_key", savedAuthKey);
-                    setShowTokenModal(false);
-                    alert("Settings saved successfully to browser local storage!");
-                  }}
-                >
-                  Save Settings
+                <button className="primary-btn" onClick={saveEditorSettings}>
+                  Save Editor Settings
                 </button>
               </div>
             </motion.div>

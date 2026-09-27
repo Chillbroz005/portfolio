@@ -350,6 +350,14 @@ nav.desktop-nav a:hover {
   padding: 8px 16px !important;
 }
 
+@media (min-width: 769px) {
+  .recruiterBtn {
+    flex: 0 0 auto;
+    min-height: 37px;
+    white-space: nowrap;
+  }
+}
+
 .recruiterBtn-icon {
   display: none;
 }
@@ -995,6 +1003,11 @@ h2.hero-subtitle {
   width: min(720px, 100%);
   position: relative;
   box-shadow: 0 25px 80px rgba(0,0,0,0.5);
+}
+
+.editor-settings-modal {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 }
 
 .modal-close {
