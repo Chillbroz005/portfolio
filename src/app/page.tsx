@@ -56,112 +56,24 @@ type GithubRepo = {
   fork: boolean;
 };
 
-type RecoveryQuestion = {
-  question: string;
-  answerHash: string;
-};
-
-type EncryptedRecoveryBackup = {
-  version: 1;
-  iv: string;
-  ciphertext: string;
-};
-
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let index = 0; index < bytes.length; index++) binary += String.fromCharCode(bytes[index]);
   return btoa(binary);
 }
-
 function base64ToBytes(value: string): Uint8Array {
   const binary = atob(value.replace(/\s/g, ""));
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
   return bytes;
 }
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.length);
-  copy.set(bytes);
-  return copy.buffer;
-}
-
-function generateRecoveryCode(): string {
-  return bytesToBase64(crypto.getRandomValues(new Uint8Array(32)));
-}
-
-async function encryptRecoveryBackup(questions: RecoveryQuestion[], recoveryCode: string): Promise<EncryptedRecoveryBackup> {
-  const key = await crypto.subtle.importKey("raw", toArrayBuffer(base64ToBytes(recoveryCode)), { name: "AES-GCM" }, false, ["encrypt"]);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = new TextEncoder().encode(JSON.stringify({ questions }));
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: toArrayBuffer(iv) }, key, toArrayBuffer(plaintext));
-  return { version: 1, iv: bytesToBase64(iv), ciphertext: bytesToBase64(new Uint8Array(ciphertext)) };
-}
-
-async function decryptRecoveryBackup(backup: EncryptedRecoveryBackup, recoveryCode: string): Promise<RecoveryQuestion[]> {
-  if (backup.version !== 1 || !backup.iv || !backup.ciphertext) throw new Error("The recovery backup has an unsupported format.");
-  const key = await crypto.subtle.importKey("raw", toArrayBuffer(base64ToBytes(recoveryCode)), { name: "AES-GCM" }, false, ["decrypt"]);
-  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toArrayBuffer(base64ToBytes(backup.iv)) }, key, toArrayBuffer(base64ToBytes(backup.ciphertext)));
-  const data = JSON.parse(new TextDecoder().decode(plaintext));
-  if (!Array.isArray(data.questions) || data.questions.length === 0 || data.questions.length > 2) {
-    throw new Error("The recovery backup does not contain valid questions.");
-  }
-  if (!data.questions.every((item: any) => item && typeof item.question === "string" && typeof item.answerHash === "string")) {
-    throw new Error("The recovery backup is incomplete.");
-  }
-  return data.questions;
-}
-
-async function uploadRecoveryBackup(backup: EncryptedRecoveryBackup, token: string): Promise<void> {
-  const path = "public/admin-recovery.enc.json";
-  const url = `https://api.github.com/repos/Chillbroz005/portfolio/contents/${path}`;
-  const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" };
-  const currentResponse = await fetch(url, { headers });
-  let sha: string | undefined;
-  if (currentResponse.ok) {
-    const currentFile = await currentResponse.json();
-    sha = currentFile.sha;
-  } else if (currentResponse.status !== 404) {
-    throw new Error(`Could not check the recovery backup (${currentResponse.status}).`);
-  }
-
-  const content = JSON.stringify(backup, null, 2);
-  const encodedContent = bytesToBase64(new TextEncoder().encode(content));
-  const updateResponse = await fetch(url, {
-    method: "PUT",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      message: "Update encrypted admin recovery backup",
-      content: encodedContent,
-      ...(sha ? { sha } : {}),
-      branch: "main"
-    })
-  });
-  if (!updateResponse.ok) {
-    const error = await updateResponse.json().catch(() => ({}));
-    throw new Error(error.message || `Could not save the encrypted recovery backup (${updateResponse.status}).`);
-  }
-}
-
-async function fetchRecoveryBackup(): Promise<EncryptedRecoveryBackup> {
-  const response = await fetch("https://api.github.com/repos/Chillbroz005/portfolio/contents/public/admin-recovery.enc.json", {
-    headers: { Accept: "application/vnd.github+json" },
-    cache: "no-store"
-  });
-  if (!response.ok) throw new Error(response.status === 404 ? "No cross-browser recovery backup has been published yet." : `Could not load the recovery backup (${response.status}).`);
-  const file = await response.json();
-  const parsed = JSON.parse(new TextDecoder().decode(base64ToBytes(file.content)));
-  if (!parsed || parsed.version !== 1 || typeof parsed.iv !== "string" || typeof parsed.ciphertext !== "string") {
-    throw new Error("The recovery backup file is invalid.");
-  }
-  return parsed as EncryptedRecoveryBackup;
-}
-
-async function hashRecoveryAnswer(answer: string): Promise<string> {
-  const normalized = answer.trim().replace(/\s+/g, " ").toLowerCase();
-  const bytes = new TextEncoder().encode(normalized);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+async function apiJson(path: string, options: RequestInit = {}) {
+  const headers = new Headers(options.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const response = await fetch(path, { ...options, credentials: "same-origin", headers });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status}).`);
+  return body;
 }
 
 async function pngDataFromBlob(blob: Blob): Promise<{ dataUrl: string; base64: string }> {
@@ -288,29 +200,24 @@ export default function Home() {
   const [photoPreview, setPhotoPreview] = useState("");
   const [photoError, setPhotoError] = useState("");
 
-  // Auth & Token Security states
-  const [authKeyInput, setAuthKeyInput] = useState("");
-  const [savedAuthKey, setSavedAuthKey] = useState("SureshAdmin123");
+  // Server-managed editor authentication.
+  const [authPassword, setAuthPassword] = useState("");
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
+  const [authError, setAuthError] = useState("");
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [githubToken, setGithubToken] = useState("");
-  const [showTokenModal, setShowTokenModal] = useState(false);
-  const [recoveryQuestions, setRecoveryQuestions] = useState<RecoveryQuestion[]>([]);
-  const [recoveryCode, setRecoveryCode] = useState("");
-  const [recoveryCodeVisible, setRecoveryCodeVisible] = useState(false);
-  const [recoveryCodeInput, setRecoveryCodeInput] = useState("");
-  const [recoveryCodeUnlocked, setRecoveryCodeUnlocked] = useState(false);
-  const [recoveryLoading, setRecoveryLoading] = useState(false);
-  const [recoveryLoadError, setRecoveryLoadError] = useState("");
-  const [recoveryQuestion1, setRecoveryQuestion1] = useState("");
-  const [recoveryAnswer1, setRecoveryAnswer1] = useState("");
-  const [recoveryQuestion2, setRecoveryQuestion2] = useState("");
-  const [recoveryAnswer2, setRecoveryAnswer2] = useState("");
-  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
-  const [recoveryAnswers, setRecoveryAnswers] = useState<string[]>([]);
-  const [recoveryVerified, setRecoveryVerified] = useState(false);
-  const [recoveryNewKey, setRecoveryNewKey] = useState("");
-  const [recoveryConfirmKey, setRecoveryConfirmKey] = useState("");
-  const [recoveryError, setRecoveryError] = useState("");
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [recoveryQuestion, setRecoveryQuestion] = useState("");
+  const [recoveryAnswer, setRecoveryAnswer] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [settingsMessage, setSettingsMessage] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [resetQuestion, setResetQuestion] = useState("");
+  const [resetAnswer, setResetAnswer] = useState("");
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
+  const [resetMode, setResetMode] = useState(false);
 
   // GitHub Push State
   const [pushStatus, setPushStatus] = useState<"idle" | "pushing" | "success" | "error">("idle");
@@ -330,55 +237,22 @@ export default function Home() {
     setThemePreferencesLoaded(true);
   }, []);
 
-  // Load saved local edits, token, and auth key
+  // Load local editing drafts and establish the server session.
   useEffect(() => {
     try {
-      const savedProfile = localStorage.getItem("sg_edited_profile");
-      if (savedProfile) setProfileData(JSON.parse(savedProfile));
-
-      const savedExp = localStorage.getItem("sg_edited_experience");
-      if (savedExp) setExpList(JSON.parse(savedExp));
-
-      const savedSkills = localStorage.getItem("sg_edited_skills");
-      if (savedSkills) setSkillsList(JSON.parse(savedSkills));
-
-      const savedSoftware = localStorage.getItem("sg_edited_software");
-      if (savedSoftware) setSoftwareList(JSON.parse(savedSoftware));
-
-      const savedTools = localStorage.getItem("sg_edited_tools");
-      if (savedTools) setToolsList(JSON.parse(savedTools));
-
-      const savedEngagements = localStorage.getItem("sg_edited_engagements");
-      if (savedEngagements) setEngagementList(JSON.parse(savedEngagements));
-
-      const savedEducation = localStorage.getItem("sg_edited_education");
-      if (savedEducation) setEducationList(JSON.parse(savedEducation));
-
-      const savedCertifications = localStorage.getItem("sg_edited_certifications");
-      if (savedCertifications) setCertificationList(JSON.parse(savedCertifications));
-
-      const savedProjects = localStorage.getItem("sg_edited_projects");
-      if (savedProjects) setProjectList(JSON.parse(savedProjects));
-
-      const savedToken = localStorage.getItem("sg_github_token");
-      if (savedToken) setGithubToken(savedToken);
-
-      const savedKey = localStorage.getItem("sg_auth_key");
-      if (savedKey) setSavedAuthKey(savedKey);
-
-      const savedRecoveryQuestions = localStorage.getItem("sg_recovery_questions");
-      if (savedRecoveryQuestions) {
-        const parsed = JSON.parse(savedRecoveryQuestions);
-        if (Array.isArray(parsed)) {
-          setRecoveryQuestions(parsed.filter(item => item && typeof item.question === "string" && typeof item.answerHash === "string"));
-          setRecoveryQuestion1(parsed[0]?.question || "");
-          setRecoveryQuestion2(parsed[1]?.question || "");
-        }
-      }
-
-      const savedRecoveryCode = localStorage.getItem("sg_recovery_code");
-      if (savedRecoveryCode) setRecoveryCode(savedRecoveryCode);
+      const keys = ["profile", "experience", "skills", "software", "tools", "engagements", "education", "certifications", "projects"];
+      const setters = [setProfileData, setExpList, setSkillsList, setSoftwareList, setToolsList, setEngagementList, setEducationList, setCertificationList, setProjectList] as Array<(value: any) => void>;
+      keys.forEach((key, index) => { const value = localStorage.getItem(`sg_edited_${key}`); if (value) setters[index](JSON.parse(value)); });
+      ["sg_github_token", "sg_auth_key", "sg_recovery_questions", "sg_recovery_code"].forEach(key => localStorage.removeItem(key));
     } catch {}
+    void apiJson("/api/auth/session").then(() => setIsEditor(true)).catch(() => setIsEditor(false));
+    const match = window.location.hash.match(/^#reset=(.+)$/);
+    if (match) {
+      const token = decodeURIComponent(match[1]);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setResetToken(token); setResetMode(true);
+      void apiJson("/api/auth/reset/challenge", { method: "POST", body: JSON.stringify({ token }) }).then(data => setResetQuestion(data.question || "")).catch(error => setResetMessage(error.message));
+    }
   }, []);
 
   const totalExperienceFormatted = useMemo(() => {
@@ -466,187 +340,42 @@ export default function Home() {
     ...Array.from(new Set([...projectFilters.slice(1), ...projectList.map(project => project.category).filter(Boolean)]))
   ], [projectList]);
 
-  // Handle Edit Mode click
-  const handleEditModeToggle = () => {
-    if (isEditor) {
-      setIsEditor(false);
-    } else {
-      setShowAuthModal(true);
-    }
+  const handleEditModeToggle = async () => {
+    if (isEditor) { await apiJson("/api/auth/logout", { method: "POST" }).catch(() => undefined); setIsEditor(false); }
+    else { setAuthError(""); setShowAuthModal(true); }
   };
-
-  // Submit Authorization Key
-  const handleAuthSubmit = () => {
-    if (authKeyInput === savedAuthKey) {
-      setIsEditor(true);
-      setShowAuthModal(false);
-      setAuthKeyInput("");
-    } else {
-      alert("❌ Incorrect Authorization Key!");
-    }
+  const handleAuthSubmit = async () => {
+    setAuthError("");
+    try { await apiJson("/api/auth/login", { method: "POST", body: JSON.stringify({ password: authPassword }) }); setIsEditor(true); setShowAuthModal(false); setAuthPassword(""); }
+    catch (error: any) { setAuthError(error.message || "Sign in failed."); }
   };
-
-  const openRecoveryModal = () => {
-    setRecoveryAnswers(Array(recoveryQuestions.length).fill(""));
-    setRecoveryCodeInput(recoveryCode);
-    setRecoveryCodeUnlocked(false);
-    setRecoveryLoadError("");
-    setRecoveryVerified(false);
-    setRecoveryNewKey("");
-    setRecoveryConfirmKey("");
-    setRecoveryError("");
-    setShowRecoveryModal(true);
+  const openEditorSettings = async () => {
+    setSettingsMessage("");
+    try { const data = await apiJson("/api/auth/recovery-question"); setRecoveryQuestion(data.question || ""); }
+    catch (error: any) { setSettingsMessage(error.message); }
+    setShowSettingsModal(true);
   };
-
-  const loadRecoveryQuestions = async () => {
-    const code = recoveryCodeInput.trim();
-    if (!code) {
-      setRecoveryLoadError("Enter the recovery code saved when you configured these questions.");
-      return;
-    }
-
-    setRecoveryLoading(true);
-    setRecoveryLoadError("");
-    try {
-      const backup = await fetchRecoveryBackup();
-      const questions = await decryptRecoveryBackup(backup, code);
-      setRecoveryQuestions(questions);
-      setRecoveryQuestion1(questions[0]?.question || "");
-      setRecoveryQuestion2(questions[1]?.question || "");
-      setRecoveryAnswers(Array(questions.length).fill(""));
-      setRecoveryCode(code);
-      setRecoveryCodeUnlocked(true);
-    } catch (error: any) {
-      setRecoveryLoadError(error?.name === "OperationError" ? "That recovery code did not unlock the backup." : error.message || "Could not load the recovery backup.");
-    } finally {
-      setRecoveryLoading(false);
-    }
+  const saveRecoveryQuestion = async () => {
+    setSettingsMessage("");
+    try { await apiJson("/api/auth/recovery-question", { method: "PUT", body: JSON.stringify({ question: recoveryQuestion, answer: recoveryAnswer }) }); setRecoveryAnswer(""); setSettingsMessage("Recovery question saved."); }
+    catch (error: any) { setSettingsMessage(error.message); }
   };
-
-  const verifyRecoveryAnswers = async () => {
-    setRecoveryError("");
-    if (recoveryQuestions.length === 0) {
-      setRecoveryError("Recovery questions have not been configured in this browser.");
-      return;
-    }
-
-    try {
-      const matches = await Promise.all(recoveryQuestions.map(async (item, index) => {
-        const answer = recoveryAnswers[index] || "";
-        return Boolean(answer.trim()) && await hashRecoveryAnswer(answer) === item.answerHash;
-      }));
-      if (matches.every(Boolean)) {
-        setRecoveryVerified(true);
-      } else {
-        setRecoveryError("Those answers do not match the configured recovery details.");
-      }
-    } catch {
-      setRecoveryError("This browser could not verify the recovery answers. Try the latest version of a modern browser.");
-    }
+  const changeAdminPassword = async () => {
+    setSettingsMessage("");
+    if (newPassword !== confirmPassword) { setSettingsMessage("The passwords do not match."); return; }
+    try { await apiJson("/api/auth/password", { method: "POST", body: JSON.stringify({ currentPassword: currentPasswordInput, newPassword }) }); setCurrentPasswordInput(""); setNewPassword(""); setConfirmPassword(""); setSettingsMessage("Password updated."); }
+    catch (error: any) { setSettingsMessage(error.message); }
   };
-
-  const resetAdminKey = () => {
-    if (!recoveryNewKey.trim()) {
-      setRecoveryError("Enter a new admin key.");
-      return;
-    }
-    if (recoveryNewKey !== recoveryConfirmKey) {
-      setRecoveryError("The new keys do not match.");
-      return;
-    }
-
-    try {
-      localStorage.setItem("sg_auth_key", recoveryNewKey);
-      if (recoveryCodeUnlocked) {
-        localStorage.setItem("sg_recovery_questions", JSON.stringify(recoveryQuestions));
-        localStorage.setItem("sg_recovery_code", recoveryCodeInput.trim());
-        setRecoveryCode(recoveryCodeInput.trim());
-      }
-      setSavedAuthKey(recoveryNewKey);
-      setShowRecoveryModal(false);
-      alert("Admin key updated in this browser.");
-    } catch {
-      setRecoveryError("Could not save the new key in this browser.");
-    }
+  const requestPasswordReset = async () => {
+    setResetMessage("");
+    try { await apiJson("/api/auth/reset/request", { method: "POST", body: JSON.stringify({}) }); setResetMessage("If email reset is configured, a reset link has been sent."); }
+    catch (error: any) { setResetMessage(error.message); }
   };
-
-  const saveEditorSettings = async () => {
-    const configured: RecoveryQuestion[] = [];
-    let code = recoveryCode;
-    let generatedCode = false;
-    const questionDrafts = [
-      { question: recoveryQuestion1, answer: recoveryAnswer1, index: 0 },
-      { question: recoveryQuestion2, answer: recoveryAnswer2, index: 1 }
-    ];
-
-    try {
-      if (!recoveryQuestion1.trim() && recoveryQuestion2.trim()) {
-        alert("Use question 1 before adding optional question 2.");
-        return;
-      }
-
-      for (const draft of questionDrafts) {
-        const question = draft.question.trim();
-        const answer = draft.answer.trim();
-        if (!question) {
-          if (answer) {
-            alert("Add a question for each recovery answer, or clear that answer.");
-            return;
-          }
-          continue;
-        }
-
-        const existing = recoveryQuestions[draft.index];
-        const answerHash = answer
-          ? await hashRecoveryAnswer(answer)
-          : existing?.question === question ? existing.answerHash : "";
-        if (!answerHash) {
-          alert(`Enter an answer for recovery question ${draft.index + 1}.`);
-          return;
-        }
-        configured.push({ question, answerHash });
-      }
-
-      if (configured.length > 0) {
-        if (!code) {
-          code = generateRecoveryCode();
-          generatedCode = true;
-          setRecoveryCode(code);
-          setRecoveryCodeVisible(true);
-        }
-
-        if (githubToken.trim()) {
-          const backup = await encryptRecoveryBackup(configured, code);
-          await uploadRecoveryBackup(backup, githubToken.trim());
-        }
-      }
-
-      localStorage.setItem("sg_github_token", githubToken);
-      localStorage.setItem("sg_auth_key", savedAuthKey);
-      localStorage.setItem("sg_recovery_questions", JSON.stringify(configured));
-      if (code) localStorage.setItem("sg_recovery_code", code);
-      setRecoveryQuestions(configured);
-      setRecoveryCode(code);
-      setRecoveryAnswer1("");
-      setRecoveryAnswer2("");
-
-      if (configured.length > 0 && !githubToken.trim()) {
-        setRecoveryCodeVisible(true);
-        alert("Saved in this browser only. Add a GitHub token with repository Contents write access, then save again to enable recovery in other browsers.");
-        return;
-      }
-
-      if (!generatedCode) setShowTokenModal(false);
-      if (configured.length > 0) {
-        alert(generatedCode
-          ? "Encrypted recovery backup synced to GitHub. Copy the recovery code shown here and store it outside this browser."
-          : "Editor settings and encrypted recovery backup synced to GitHub.");
-      } else {
-        alert("Editor settings saved in this browser.");
-      }
-    } catch (error: any) {
-      alert(error?.message || "Could not save editor settings. Check browser support and GitHub token permissions.");
-    }
+  const completePasswordReset = async () => {
+    setResetMessage("");
+    if (resetPassword !== resetConfirmPassword) { setResetMessage("The passwords do not match."); return; }
+    try { await apiJson("/api/auth/reset/complete", { method: "POST", body: JSON.stringify({ token: resetToken, answer: resetAnswer, newPassword: resetPassword }) }); setResetMessage("Password reset. You can now sign in."); setResetMode(false); setResetToken(""); setResetAnswer(""); setResetPassword(""); setResetConfirmPassword(""); }
+    catch (error: any) { setResetMessage(error.message); }
   };
 
   const addListItem = (
@@ -698,99 +427,25 @@ export default function Home() {
     setOpen(0);
   };
 
-  // Publish the profile, generated resume, and optional replacement photo in one Git commit.
+  // Publish updates through the authenticated Pages Function; the GitHub credential stays server-side.
   const pushToGitHub = async () => {
-    if (!githubToken) {
-      setShowTokenModal(true);
-      return;
-    }
-
-    setPushStatus("pushing");
-    setPushMessage("Preparing your profile, photo, and resume...");
-
+    if (!isEditor) { setShowAuthModal(true); return; }
+    setPushStatus("pushing"); setPushMessage("Preparing your profile, photo, and resume...");
     try {
-      const repoOwner = "Chillbroz005";
-      const repoName = "portfolio";
       const profileForPublish = selectedPhoto ? { ...profileData, profilePhotoVersion: Date.now() } : profileData;
       const updatedCode = `export const profile = ${JSON.stringify(profileForPublish, null, 2)} as const;\n\nexport type ExperienceItem = {\n  company: string;\n  role: string;\n  location: string;\n  dates: string;\n  startDate: string;\n  endDate: string | null;\n  bullets: string[];\n};\n\nexport const experience: ExperienceItem[] = ${JSON.stringify(expList, null, 2)};\n\nexport const engagements = ${JSON.stringify(engagementList, null, 2)};\n\nexport const skills = ${JSON.stringify(skillsList, null, 2)};\n\nexport const software = ${JSON.stringify(softwareList, null, 2)};\n\nexport const tools = ${JSON.stringify(toolsList, null, 2)};\n\nexport const education = ${JSON.stringify(educationList, null, 2)};\n\nexport const certifications = ${JSON.stringify(certificationList, null, 2)};\n\nexport const projects = ${JSON.stringify(projectList, null, 2)};\n`;
-      const photoData = selectedPhoto
-        ? await pngDataFromBlob(selectedPhoto)
-        : await loadCurrentPhotoData();
-      const resumeBytes = await generateResumePdf({
-        profile: profileForPublish,
-        experience: expList,
-        skills: skillsList,
-        software: softwareList,
-        tools: toolsList,
-        engagements: engagementList,
-        education: educationList,
-        certifications: certificationList,
-        projects: projectList
-      }, photoData.dataUrl);
-
-      const headers = {
-        Authorization: `Bearer ${githubToken.trim()}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json"
-      };
-      const apiRequest = async (endpoint: string, method = "GET", body?: Record<string, unknown>) => {
-        const response = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/${endpoint}`, {
-          method,
-          headers,
-          ...(body ? { body: JSON.stringify(body) } : {})
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.message || `GitHub request failed (${response.status}). Check the token's Contents write permission.`);
-        return result;
-      };
-
-      const files: Array<{ path: string; bytes: Uint8Array }> = [
-        { path: "src/data/profile.ts", bytes: new TextEncoder().encode(updatedCode) },
-        { path: "public/resume.pdf", bytes: resumeBytes }
-      ];
+      const photoData = selectedPhoto ? await pngDataFromBlob(selectedPhoto) : await loadCurrentPhotoData();
+      const resumeBytes = await generateResumePdf({ profile: profileForPublish, experience: expList, skills: skillsList, software: softwareList, tools: toolsList, engagements: engagementList, education: educationList, certifications: certificationList, projects: projectList }, photoData.dataUrl);
+      const files: Array<{ path: string; bytes: Uint8Array }> = [{ path: "src/data/profile.ts", bytes: new TextEncoder().encode(updatedCode) }, { path: "public/resume.pdf", bytes: resumeBytes }];
       if (selectedPhoto) files.push({ path: "public/profile-photo.png", bytes: base64ToBytes(photoData.base64) });
-
-      setPushMessage("Uploading the updated files as one GitHub commit...");
-      const branchRef = await apiRequest("git/ref/heads/main");
-      const parentCommit = await apiRequest(`git/commits/${branchRef.object.sha}`);
-      const blobs = await Promise.all(files.map(async file => {
-        const blob = await apiRequest("git/blobs", "POST", {
-          content: bytesToBase64(file.bytes),
-          encoding: "base64"
-        });
-        return { path: file.path, mode: "100644", type: "blob", sha: blob.sha };
-      }));
-      const tree = await apiRequest("git/trees", "POST", {
-        base_tree: parentCommit.tree.sha,
-        tree: blobs
-      });
-      const commit = await apiRequest("git/commits", "POST", {
-        message: "Publish portfolio profile and synchronized resume",
-        tree: tree.sha,
-        parents: [branchRef.object.sha]
-      });
-      await apiRequest("git/refs/heads/main", "PATCH", { sha: commit.sha, force: false });
-
+      setPushMessage("Publishing the files through the server...");
+      await apiJson("/api/editor/publish", { method: "POST", body: JSON.stringify({ files: files.map(file => ({ path: file.path, contentBase64: bytesToBase64(file.bytes) })) }) });
       setProfileData(profileForPublish);
       try {
-        localStorage.setItem("sg_edited_profile", JSON.stringify(profileForPublish));
-        localStorage.setItem("sg_edited_experience", JSON.stringify(expList));
-        localStorage.setItem("sg_edited_skills", JSON.stringify(skillsList));
-        localStorage.setItem("sg_edited_software", JSON.stringify(softwareList));
-        localStorage.setItem("sg_edited_tools", JSON.stringify(toolsList));
-        localStorage.setItem("sg_edited_engagements", JSON.stringify(engagementList));
-        localStorage.setItem("sg_edited_education", JSON.stringify(educationList));
-        localStorage.setItem("sg_edited_certifications", JSON.stringify(certificationList));
-        localStorage.setItem("sg_edited_projects", JSON.stringify(projectList));
+        localStorage.setItem("sg_edited_profile", JSON.stringify(profileForPublish)); localStorage.setItem("sg_edited_experience", JSON.stringify(expList)); localStorage.setItem("sg_edited_skills", JSON.stringify(skillsList)); localStorage.setItem("sg_edited_software", JSON.stringify(softwareList)); localStorage.setItem("sg_edited_tools", JSON.stringify(toolsList)); localStorage.setItem("sg_edited_engagements", JSON.stringify(engagementList)); localStorage.setItem("sg_edited_education", JSON.stringify(educationList)); localStorage.setItem("sg_edited_certifications", JSON.stringify(certificationList)); localStorage.setItem("sg_edited_projects", JSON.stringify(projectList));
       } catch {}
-
-      setPushStatus("success");
-      setPushMessage(`Published the profile and matching resume${selectedPhoto ? ", including your new photo" : ""} in one GitHub commit. The live site will update after GitHub Pages finishes building.`);
-    } catch (err: any) {
-      setPushStatus("error");
-      setPushMessage(`Push failed: ${err.message}`);
-    }
+      setPushStatus("success"); setPushMessage(`Published the profile and matching resume${selectedPhoto ? ", including your new photo" : ""}. Cloudflare Pages will rebuild the site.`);
+    } catch (error: any) { setPushStatus("error"); setPushMessage(`Publish failed: ${error.message}`); }
   };
 
   return (
@@ -850,9 +505,9 @@ export default function Home() {
           </button>
           <button
             className="editor-settings-btn"
-            onClick={openRecoveryModal}
-            aria-label="Recover admin key"
-            title="Admin key recovery"
+            onClick={() => void openEditorSettings()}
+            aria-label="Editor settings"
+            title="Editor settings"
           >
             <Settings size={16} />
           </button>
@@ -946,7 +601,7 @@ export default function Home() {
                 <Sparkles size={15} /> Push to GitHub 🚀
               </button>
               <button
-                onClick={() => setShowTokenModal(true)}
+                onClick={() => void openEditorSettings()}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -1649,228 +1304,34 @@ export default function Home() {
         <Download size={16} /> Resume PDF
       </a>
 
-      {/* Admin Authorization Prompt Modal */}
+      {/* Server-backed editor sign-in */}
       <AnimatePresence>
-        {showAuthModal && (
-          <div className="modal-backdrop">
-            <motion.div className="recruiter-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-              <button className="modal-close" onClick={() => setShowAuthModal(false)} aria-label="Close modal">
-                <X size={18} />
-              </button>
-              <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
-                <Lock size={40} style={{ color: "var(--accent)", margin: "0 auto 10px" }} />
-                <h2 style={{ fontSize: "24px", fontWeight: 900 }}>Admin Passkey Required</h2>
-                <p style={{ color: "var(--muted)", fontSize: "14px" }}>Please enter your authorization phrase to enable editing.</p>
-              </div>
-              <div style={{ display: "grid", gap: "10px", marginBottom: "1.5rem" }}>
-                <input
-                  type="password"
-                  style={{ width: "100%", padding: "12px", background: "var(--bg)", border: "1px solid var(--accent)", borderRadius: "10px", color: "var(--text)" }}
-                  value={authKeyInput}
-                  placeholder="Enter access key..."
-                  onKeyDown={e => e.key === "Enter" && handleAuthSubmit()}
-                  onChange={e => setAuthKeyInput(e.target.value)}
-                />
-                <button
-                  className="forgot-key-link"
-                  type="button"
-                  onClick={() => {
-                    setAuthKeyInput("");
-                    setShowAuthModal(false);
-                    openRecoveryModal();
-                  }}
-                >
-                  Forgot your admin key? Recover it
-                </button>
-              </div>
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-                <button className="secondary-btn" onClick={() => setShowAuthModal(false)}>Cancel</button>
-                <button className="primary-btn" onClick={handleAuthSubmit}>Unlock Editor</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
+        {showAuthModal && <div className="modal-backdrop"><motion.div className="recruiter-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+          <button className="modal-close" onClick={() => setShowAuthModal(false)} aria-label="Close"><X size={18} /></button>
+          <div style={{ textAlign: "center", marginBottom: "1.5rem" }}><Lock size={40} style={{ color: "var(--accent)", margin: "0 auto 10px" }} /><h2 style={{ fontSize: "24px", fontWeight: 900 }}>Editor Sign In</h2><p style={{ color: "var(--muted)", fontSize: "14px" }}>Your password is verified by the site server.</p></div>
+          <input type="password" autoComplete="current-password" style={{ width: "100%", padding: "12px", background: "var(--bg)", border: "1px solid var(--accent)", borderRadius: "10px", color: "var(--text)" }} value={authPassword} placeholder="Admin password" onKeyDown={e => e.key === "Enter" && void handleAuthSubmit()} onChange={e => setAuthPassword(e.target.value)} />
+          {authError && <p role="alert" style={{ color: "#ef4444", fontSize: "13px" }}>{authError}</p>}
+          <button className="forgot-key-link" type="button" onClick={() => { setShowAuthModal(false); setResetMode(true); setResetMessage("Enter the details from your password reset email."); void requestPasswordReset(); }}>Forgot password? Send reset email</button>
+          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "1rem" }}><button className="secondary-btn" onClick={() => setShowAuthModal(false)}>Cancel</button><button className="primary-btn" onClick={() => void handleAuthSubmit()}>Sign In</button></div>
+        </motion.div></div>}
       </AnimatePresence>
-
-      {/* Admin Key Recovery Modal */}
+      {/* Email gated password reset */}
       <AnimatePresence>
-        {showRecoveryModal && (
-          <div className="modal-backdrop">
-            <motion.div className="recruiter-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-              <button className="modal-close" onClick={() => setShowRecoveryModal(false)} aria-label="Close recovery dialog">
-                <X size={18} />
-              </button>
-              <span className="eyebrow">ADMIN KEY RECOVERY</span>
-              <h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px 0" }}>Forgot your admin key?</h2>
-              <p style={{ color: "var(--muted)", fontSize: "13px", lineHeight: 1.6, marginBottom: "1.25rem" }}>
-                In a new browser, enter your saved recovery code first, then answer your configured question(s). Recovery does not provide GitHub publishing access.
-              </p>
-
-              {recoveryQuestions.length === 0 && !recoveryCodeUnlocked ? (
-                <div style={{ display: "grid", gap: "12px" }}>
-                  <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>
-                    Recovery code
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }}
-                      value={recoveryCodeInput}
-                      onChange={event => setRecoveryCodeInput(event.target.value)}
-                    />
-                  </label>
-                  {recoveryLoadError && <p role="alert" style={{ color: "#ef4444", fontSize: "13px" }}>{recoveryLoadError}</p>}
-                </div>
-              ) : recoveryQuestions.length > 0 && !recoveryVerified ? (
-                <div style={{ display: "grid", gap: "14px" }}>
-                  {recoveryQuestions.map((item, index) => (
-                    <label key={`${item.question}-${index}`} style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 700 }}>
-                      {item.question}
-                      <input
-                        type="password"
-                        autoComplete="off"
-                        style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }}
-                        value={recoveryAnswers[index] || ""}
-                        onChange={event => setRecoveryAnswers(current => current.map((answer, answerIndex) => answerIndex === index ? event.target.value : answer))}
-                      />
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: "12px" }}>
-                  <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>
-                    New admin key
-                    <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryNewKey} onChange={event => setRecoveryNewKey(event.target.value)} />
-                  </label>
-                  <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>
-                    Confirm new admin key
-                    <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryConfirmKey} onChange={event => setRecoveryConfirmKey(event.target.value)} />
-                  </label>
-                </div>
-              )}
-
-              {recoveryError && <p role="alert" style={{ color: "#ef4444", fontSize: "13px", marginTop: "12px" }}>{recoveryError}</p>}
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "1.5rem" }}>
-                <button className="secondary-btn" onClick={() => setShowRecoveryModal(false)}>Close</button>
-                {recoveryQuestions.length === 0 && !recoveryCodeUnlocked && <button className="primary-btn" disabled={recoveryLoading} onClick={loadRecoveryQuestions}>{recoveryLoading ? "Loading..." : "Load Questions"}</button>}
-                {recoveryQuestions.length > 0 && !recoveryVerified && <button className="primary-btn" onClick={verifyRecoveryAnswers}>Verify Answers</button>}
-                {recoveryVerified && <button className="primary-btn" onClick={resetAdminKey}>Save New Key</button>}
-              </div>
-            </motion.div>
-          </div>
-        )}
+        {resetMode && <div className="modal-backdrop"><motion.div className="recruiter-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+          <button className="modal-close" onClick={() => setResetMode(false)} aria-label="Close"><X size={18} /></button><span className="eyebrow">PASSWORD RECOVERY</span><h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px" }}>Reset editor password</h2>
+          {!resetToken && <p style={{ color: "var(--muted)", fontSize: "13px" }}>A reset link will be sent to the configured email address.</p>}
+          {resetToken && <><p style={{ color: "var(--muted)", fontSize: "13px" }}>Email link verified. Answer the configured recovery question to continue.</p><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>{resetQuestion}<input type="password" autoComplete="off" value={resetAnswer} onChange={event => setResetAnswer(event.target.value)} /></label><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>New password<input type="password" autoComplete="new-password" value={resetPassword} onChange={event => setResetPassword(event.target.value)} /></label><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>Confirm new password<input type="password" autoComplete="new-password" value={resetConfirmPassword} onChange={event => setResetConfirmPassword(event.target.value)} /></label></>}
+          {resetMessage && <p role="status" style={{ color: "var(--muted)", fontSize: "13px", marginTop: "12px" }}>{resetMessage}</p>}<div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "1.5rem" }}><button className="secondary-btn" onClick={() => setResetMode(false)}>Close</button>{resetToken && <button className="primary-btn" onClick={() => void completePasswordReset()}>Reset Password</button>}</div>
+        </motion.div></div>}
       </AnimatePresence>
-
-      {/* Editor Settings Modal */}
+      {/* Server side editor settings */}
       <AnimatePresence>
-        {showTokenModal && (
-          <div className="modal-backdrop">
-            <motion.div className="recruiter-modal editor-settings-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-              <button className="modal-close" onClick={() => setShowTokenModal(false)} aria-label="Close modal">
-                <X size={18} />
-              </button>
-              <span className="eyebrow">EDITOR ONLY</span>
-              <h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px 0" }}>Editor Settings</h2>
-
-              {/* GitHub PAT Storage Description */}
-              <div style={{ padding: "12px", background: "var(--accent-soft)", borderRadius: "12px", border: "1px solid var(--line)", fontSize: "13px", lineHeight: 1.5, marginBottom: "1.5rem" }}>
-                Your token and admin key stay in this browser. The recovery backup is encrypted before it is committed to the public repository. Save the recovery code somewhere outside this browser.
-              </div>
-
-              <div style={{ display: "grid", gap: "15px", marginBottom: "1.5rem" }}>
-                <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
-                  GitHub Personal Access Token:
-                  <input
-                    type="password"
-                    style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }}
-                    value={githubToken}
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                    onChange={e => setGithubToken(e.target.value)}
-                  />
-                </label>
-
-                <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
-                  Customize Admin Passkey (Auth Key):
-                  <input
-                    type="text"
-                    style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }}
-                    value={savedAuthKey}
-                    placeholder="SureshAdmin123"
-                    onChange={e => setSavedAuthKey(e.target.value)}
-                  />
-                </label>
-
-                <div style={{ display: "grid", gap: "10px", borderTop: "1px solid var(--line)", paddingTop: "14px" }}>
-                  <div>
-                    <strong style={{ fontSize: "14px" }}>Forgot key recovery</strong>
-                    <p style={{ color: "var(--muted)", fontSize: "12px", lineHeight: 1.5, margin: "4px 0 0" }}>
-                      Configure one or two questions. Leave an existing answer blank to keep it. A GitHub token with repository Contents write access is needed to sync the encrypted backup across browsers.
-                    </p>
-                  </div>
-                  <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
-                    Recovery question 1
-                    <input type="text" autoComplete="off" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryQuestion1} placeholder="Example: What was your childhood nickname?" onChange={event => setRecoveryQuestion1(event.target.value)} />
-                  </label>
-                  <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
-                    Answer 1 {recoveryQuestions[0]?.question === recoveryQuestion1 && "(leave blank to keep saved answer)"}
-                    <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryAnswer1} onChange={event => setRecoveryAnswer1(event.target.value)} />
-                  </label>
-                  <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
-                    Recovery question 2 (optional)
-                    <input type="text" autoComplete="off" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryQuestion2} placeholder="Example: What was the name of your first pet?" onChange={event => setRecoveryQuestion2(event.target.value)} />
-                  </label>
-                  <label style={{ fontSize: "12px", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, display: "grid", gap: "6px" }}>
-                    Answer 2 {recoveryQuestions[1]?.question === recoveryQuestion2 && "(leave blank to keep saved answer)"}
-                    <input type="password" autoComplete="new-password" style={{ padding: "12px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }} value={recoveryAnswer2} onChange={event => setRecoveryAnswer2(event.target.value)} />
-                  </label>
-                  <div style={{ display: "grid", gap: "8px", borderTop: "1px solid var(--line)", paddingTop: "14px" }}>
-                    <strong style={{ fontSize: "14px" }}>Cross-browser recovery code</strong>
-                    <p style={{ color: "var(--muted)", fontSize: "12px", lineHeight: 1.5, margin: 0 }}>
-                      Keep this code in a password manager. You will need it with your answers to recover from another browser.
-                    </p>
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      <input
-                        type={recoveryCodeVisible ? "text" : "password"}
-                        readOnly
-                        aria-label="Cross-browser recovery code"
-                        style={{ flex: "1 1 260px", minWidth: 0, padding: "10px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "10px", color: "var(--text)" }}
-                        value={recoveryCode}
-                        placeholder="Generated when you save recovery questions"
-                      />
-                      <button className="secondary-btn" type="button" disabled={!recoveryCode} onClick={() => setRecoveryCodeVisible(value => !value)}>
-                        {recoveryCodeVisible ? "Hide" : "Reveal"}
-                      </button>
-                      <button
-                        className="secondary-btn"
-                        type="button"
-                        disabled={!recoveryCode}
-                        onClick={async () => {
-                          try {
-                            await navigator.clipboard.writeText(recoveryCode);
-                            alert("Recovery code copied. Store it somewhere outside this browser.");
-                          } catch {
-                            setRecoveryCodeVisible(true);
-                            alert("Copy the revealed recovery code and store it somewhere outside this browser.");
-                          }
-                        }}
-                      >
-                        Copy Code
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-                <button className="secondary-btn" onClick={() => setShowTokenModal(false)}>
-                  Cancel
-                </button>
-                <button className="primary-btn" onClick={saveEditorSettings}>
-                  Save Editor Settings
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
+        {showSettingsModal && <div className="modal-backdrop"><motion.div className="recruiter-modal editor-settings-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+          <button className="modal-close" onClick={() => setShowSettingsModal(false)} aria-label="Close"><X size={18} /></button><span className="eyebrow">EDITOR ONLY</span><h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px" }}>Editor Settings</h2><p style={{ color: "var(--muted)", fontSize: "13px", lineHeight: 1.5 }}>Secrets and credentials stay on the server. Email password reset requires a verified sender domain.</p>
+          <div style={{ display: "grid", gap: "12px", marginTop: "1.25rem" }}><strong>Recovery question</strong><input type="text" autoComplete="off" value={recoveryQuestion} placeholder="Your recovery question" onChange={event => setRecoveryQuestion(event.target.value)} /><input type="password" autoComplete="new-password" value={recoveryAnswer} placeholder="Answer (leave blank to keep current answer)" onChange={event => setRecoveryAnswer(event.target.value)} /><button className="secondary-btn" onClick={() => void saveRecoveryQuestion()}>Save Recovery Question</button></div>
+          <div style={{ display: "grid", gap: "12px", borderTop: "1px solid var(--line)", paddingTop: "14px", marginTop: "18px" }}><strong>Change password</strong><input type="password" autoComplete="current-password" value={currentPasswordInput} placeholder="Current password" onChange={event => setCurrentPasswordInput(event.target.value)} /><input type="password" autoComplete="new-password" value={newPassword} placeholder="New password" onChange={event => setNewPassword(event.target.value)} /><input type="password" autoComplete="new-password" value={confirmPassword} placeholder="Confirm new password" onChange={event => setConfirmPassword(event.target.value)} /><button className="secondary-btn" onClick={() => void changeAdminPassword()}>Change Password</button></div>
+          {settingsMessage && <p role="status" style={{ color: "var(--muted)", fontSize: "13px", marginTop: "12px" }}>{settingsMessage}</p>}<div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem" }}><button className="secondary-btn" onClick={() => setShowSettingsModal(false)}>Close</button></div>
+        </motion.div></div>}
       </AnimatePresence>
 
       {/* Recruiter Modal */}
