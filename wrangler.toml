@@ -2,6 +2,9 @@ name = "chillbroz005-portfolio"
 pages_build_output_dir = "./out"
 compatibility_date = "2026-09-28"
 
+[vars]
+SITE_ORIGIN = "https://chillbroz005-portfolio.pages.dev"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "portfolio-auth"
