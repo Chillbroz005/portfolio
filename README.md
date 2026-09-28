@@ -26,6 +26,7 @@ The previous editor passkey was embedded in client code and must be considered p
 
    - `GITHUB_CONTENTS_TOKEN`: fine-grained token limited to this repository with Contents read/write access.
    - `RESEND_API_KEY`: API key from the Resend account.
+   - `AUTH_PEPPER`: a stable, random value with at least 32 bytes of entropy. Keep it as a Cloudflare secret; losing or rotating it requires resetting the admin password and recovery answer in D1.
    - `INITIAL_ADMIN_PASSWORD`: a temporary initial password of at least 12 characters. The first successful login stores its salted verifier in D1. Remove this secret after that login.
 
    Add these variables:
@@ -36,9 +37,9 @@ The previous editor passkey was embedded in client code and must be considered p
 
 4. Redeploy the Pages project after creating the D1 binding and settings. Do not put secret values in this repository or in chat.
 
-Password and recovery answers are stored only as salted PBKDF2-HMAC-SHA256 verifiers in D1. Reset emails expire after 15 minutes and can be used once; resetting also requires the configured security answer. A password can also be changed from editor settings. For an owner-operated emergency reset, set a new `INITIAL_ADMIN_PASSWORD` secret, delete the rows from `admin_sessions` and `admin_credentials` in the D1 console, sign in once with the new value, then remove the temporary secret.
+Passwords and recovery answers are stored as salted HMAC-SHA256 verifiers keyed with the server-only `AUTH_PEPPER`. The pepper must be random and remain private in Cloudflare Secrets. Login and reset requests also have D1-backed rate limits. Use a unique password of at least 12 characters. Reset emails expire after 15 minutes and can be used once; resetting also requires the configured security answer. A password can also be changed from editor settings. For an owner-operated emergency reset, set a new `INITIAL_ADMIN_PASSWORD` secret, delete the rows from `admin_sessions` and `admin_credentials` in the D1 console, sign in once with the new value, then remove the temporary secret.
 
-The password and recovery-answer verifiers use 600,000 PBKDF2 iterations. Set the Pages Functions CPU limit high enough for this work; Cloudflare Workers Free currently allows 10 ms CPU per request, so a Workers Paid plan with a higher configured CPU limit may be required. [Cloudflare CPU limits](https://developers.cloudflare.com/workers/platform/limits/) ? [OWASP password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+The authentication functions are designed to run within Cloudflare Workers Free's 10 ms CPU limit. The HMAC verifier depends on the secrecy of the high-entropy `AUTH_PEPPER`; if it is exposed, replace it and reset the stored credentials. [Cloudflare CPU limits](https://developers.cloudflare.com/workers/platform/limits/)
 
 Resend requires an owned, verified sending domain before it will send reset email. Until that is configured, the in-site email reset cannot complete; the Cloudflare D1 reset procedure remains available. [Resend verified domains](https://resend.com/docs/dashboard/domains/introduction)
 

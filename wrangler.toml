@@ -6,6 +6,3 @@ compatibility_date = "2026-09-28"
 binding = "DB"
 database_name = "portfolio-auth"
 database_id = "06e3e0c0-07ab-404a-8fbe-6e5938c6c623"
-
-[limits]
-cpu_ms = 30000

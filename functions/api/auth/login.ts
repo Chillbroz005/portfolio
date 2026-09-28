@@ -2,6 +2,7 @@ import { createSession, isSameOriginMutation, json, rateLimit, readJson, verifyA
 
 export async function onRequestPost({ request, env }: PagesContext): Promise<Response> {
   if (!isSameOriginMutation(request)) return json({ error: "Request rejected." }, 403);
+  if (!env.AUTH_PEPPER) return json({ error: "Editor authentication is not configured yet." }, 503);
   if (!await rateLimit(env, request, "login", 5, 900)) return json({ error: "Too many attempts. Try again in 15 minutes." }, 429);
   const body = await readJson<{ password?: unknown }>(request, 2048);
   if (typeof body?.password !== "string" || body.password.length > 128) return json({ error: "Enter your admin password." }, 400);

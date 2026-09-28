@@ -16,6 +16,7 @@ export interface D1Database {
 
 export interface Env {
   DB: D1Database;
+  AUTH_PEPPER: string;
   GITHUB_CONTENTS_TOKEN: string;
   RESEND_API_KEY: string;
   RESEND_FROM: string;
@@ -32,7 +33,6 @@ export interface PagesContext {
 export type CredentialRow = { password_salt: string; password_hash: string };
 export type RecoveryRow = { question: string; answer_salt: string; answer_hash: string };
 
-const PASSWORD_ITERATIONS = 600_000;
 const SESSION_SECONDS = 8 * 60 * 60;
 
 export function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
@@ -93,17 +93,17 @@ function constantTimeEqual(left: string, right: string): boolean {
   return difference === 0;
 }
 
-export async function derivePasswordHash(password: string, salt?: string): Promise<{ salt: string; hash: string }> {
+export async function derivePasswordHash(password: string, pepper: string, salt?: string): Promise<{ salt: string; hash: string }> {
+  if (!pepper || pepper.length < 40) throw new Error("AUTH_PEPPER is not configured.");
   const saltBytes = salt ? base64UrlToBytes(salt) : crypto.getRandomValues(new Uint8Array(16));
-  const saltBuffer = new ArrayBuffer(saltBytes.byteLength);
-  new Uint8Array(saltBuffer).set(saltBytes);
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: saltBuffer, iterations: PASSWORD_ITERATIONS }, key, 256);
-  return { salt: bytesToBase64Url(saltBytes), hash: bytesToBase64Url(new Uint8Array(bits)) };
+  const encodedSalt = bytesToBase64Url(saltBytes);
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pepper), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${encodedSalt}:${password}`));
+  return { salt: encodedSalt, hash: bytesToBase64Url(new Uint8Array(signature)) };
 }
 
-export async function verifyPassword(password: string, credential: CredentialRow): Promise<boolean> {
-  const calculated = await derivePasswordHash(password, credential.password_salt);
+export async function verifyPassword(password: string, credential: CredentialRow, pepper: string): Promise<boolean> {
+  const calculated = await derivePasswordHash(password, pepper, credential.password_salt);
   return constantTimeEqual(calculated.hash, credential.password_hash);
 }
 
@@ -112,17 +112,17 @@ export async function verifyAdminPassword(env: Env, password: string): Promise<b
   if (!credential) {
     const bootstrapPassword = env.INITIAL_ADMIN_PASSWORD;
     if (!bootstrapPassword || !constantTimeEqual(password, bootstrapPassword)) return false;
-    const derived = await derivePasswordHash(password);
+    const derived = await derivePasswordHash(password, env.AUTH_PEPPER);
     await env.DB.prepare(
       "INSERT OR IGNORE INTO admin_credentials (id, password_salt, password_hash, updated_at) VALUES (1, ?, ?, ?)"
     ).bind(derived.salt, derived.hash, Math.floor(Date.now() / 1000)).run();
     credential = await env.DB.prepare("SELECT password_salt, password_hash FROM admin_credentials WHERE id = 1").first<CredentialRow>();
   }
-  return credential ? verifyPassword(password, credential) : false;
+  return credential ? verifyPassword(password, credential, env.AUTH_PEPPER) : false;
 }
 
 export async function storeAdminPassword(env: Env, password: string): Promise<void> {
-  const derived = await derivePasswordHash(password);
+  const derived = await derivePasswordHash(password, env.AUTH_PEPPER);
   await env.DB.prepare(
     "INSERT INTO admin_credentials (id, password_salt, password_hash, updated_at) VALUES (1, ?, ?, ?) " +
     "ON CONFLICT(id) DO UPDATE SET password_salt = excluded.password_salt, password_hash = excluded.password_hash, updated_at = excluded.updated_at"
@@ -181,10 +181,10 @@ export async function rateLimit(env: Env, request: Request, action: string, maxH
   return (record?.hits || 0) <= maxHits;
 }
 
-export async function answerMatches(answer: string, recovery: RecoveryRow): Promise<boolean> {
+export async function answerMatches(answer: string, recovery: RecoveryRow, pepper: string): Promise<boolean> {
   const normalized = normalizeAnswer(answer);
   if (!normalized) return false;
-  const calculated = await derivePasswordHash(normalized, recovery.answer_salt);
+  const calculated = await derivePasswordHash(normalized, pepper, recovery.answer_salt);
   return constantTimeEqual(calculated.hash, recovery.answer_hash);
 }
 
@@ -200,8 +200,8 @@ export function recoveryAnswerIsValid(value: unknown): value is string {
   return typeof value === "string" && normalizeAnswer(value).length >= 8 && value.length <= 200;
 }
 
-export async function hashRecoveryAnswer(answer: string): Promise<{ salt: string; hash: string }> {
-  return derivePasswordHash(normalizeAnswer(answer));
+export async function hashRecoveryAnswer(answer: string, pepper: string): Promise<{ salt: string; hash: string }> {
+  return derivePasswordHash(normalizeAnswer(answer), pepper);
 }
 
 export async function cleanupExpiredRecords(env: Env): Promise<void> {

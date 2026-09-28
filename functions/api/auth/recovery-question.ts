@@ -15,7 +15,7 @@ export async function onRequestPut({ request, env }: PagesContext): Promise<Resp
   const existing = await env.DB.prepare("SELECT question, answer_salt, answer_hash FROM recovery_settings WHERE id = 1").first<{ question: string; answer_salt: string; answer_hash: string }>();
   if (existing && existing.question === question && body.answer === "") return json({ saved: true, question });
   if (!recoveryAnswerIsValid(body.answer)) return json({ error: "Enter an answer with at least 8 characters." }, 400);
-  const answer = await hashRecoveryAnswer(body.answer);
+  const answer = await hashRecoveryAnswer(body.answer, env.AUTH_PEPPER);
   await env.DB.prepare(
     "INSERT INTO recovery_settings (id, question, answer_salt, answer_hash, updated_at) VALUES (1, ?, ?, ?, ?) " +
     "ON CONFLICT(id) DO UPDATE SET question = excluded.question, answer_salt = excluded.answer_salt, answer_hash = excluded.answer_hash, updated_at = excluded.updated_at"

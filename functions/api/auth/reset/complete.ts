@@ -13,7 +13,7 @@ export async function onRequestPost({ request, env }: PagesContext): Promise<Res
   const reset = await env.DB.prepare("SELECT token_hash FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?")
     .bind(tokenHash, now).first<{ token_hash: string }>();
   const recovery = await env.DB.prepare("SELECT question, answer_salt, answer_hash FROM recovery_settings WHERE id = 1").first<RecoveryRow>();
-  if (!reset || !recovery || !await answerMatches(body.answer, recovery)) return json({ error: "The reset link or answer was not accepted." }, 400);
+  if (!reset || !recovery || !await answerMatches(body.answer, recovery, env.AUTH_PEPPER)) return json({ error: "The reset link or answer was not accepted." }, 400);
 
   const claimed = await env.DB.prepare("UPDATE password_reset_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? RETURNING token_hash")
     .bind(now, tokenHash, now).first<{ token_hash: string }>();
