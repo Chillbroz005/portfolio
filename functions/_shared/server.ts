@@ -31,7 +31,14 @@ export interface PagesContext {
 }
 
 export type CredentialRow = { password_salt: string; password_hash: string };
-export type RecoveryRow = { question: string; answer_salt: string; answer_hash: string };
+export type RecoveryRow = {
+  question: string;
+  answer_salt: string;
+  answer_hash: string;
+  question_2?: string | null;
+  answer_salt_2?: string | null;
+  answer_hash_2?: string | null;
+};
 
 const SESSION_SECONDS = 8 * 60 * 60;
 
@@ -202,6 +209,18 @@ export function recoveryAnswerIsValid(value: unknown): value is string {
 
 export async function hashRecoveryAnswer(answer: string, pepper: string): Promise<{ salt: string; hash: string }> {
   return derivePasswordHash(normalizeAnswer(answer), pepper);
+}
+
+export async function recoveryAnswersMatch(answer: string, answer2: string | undefined, recovery: RecoveryRow, pepper: string): Promise<boolean> {
+  if (!await answerMatches(answer, recovery, pepper)) return false;
+  if (!recovery.question_2 || !recovery.answer_salt_2 || !recovery.answer_hash_2) return true;
+  if (typeof answer2 !== "string") return false;
+  const second: RecoveryRow = {
+    question: recovery.question_2,
+    answer_salt: recovery.answer_salt_2,
+    answer_hash: recovery.answer_hash_2
+  };
+  return answerMatches(answer2, second, pepper);
 }
 
 export async function cleanupExpiredRecords(env: Env): Promise<void> {
