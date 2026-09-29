@@ -41,6 +41,8 @@ The previous editor passkey was embedded in client code and must be considered p
 
 Passwords and recovery answers are stored as salted HMAC-SHA256 verifiers keyed with the server-only `AUTH_PEPPER`. The pepper must be random and remain private in Cloudflare Secrets. Login and reset requests also have D1-backed rate limits. Use a unique password of at least 12 characters. Reset emails expire after 15 minutes and can be used once; resetting also requires the configured security answer. A password can also be changed from editor settings. For an owner-operated emergency reset, set a new `INITIAL_ADMIN_PASSWORD` secret, delete the rows from `admin_sessions` and `admin_credentials` in the D1 console, sign in once with the new value, then remove the temporary secret.
 
+Password recovery can use either the email reset link or the recovery answer alone. Recovery-answer-only resets are rate limited to five attempts per IP and twenty attempts total per 15-minute window; choose an answer that is hard to guess.
+
 The authentication functions are designed to run within Cloudflare Workers Free's 10 ms CPU limit. The HMAC verifier depends on the secrecy of the high-entropy `AUTH_PEPPER`; if it is exposed, replace it and reset the stored credentials. [Cloudflare CPU limits](https://developers.cloudflare.com/workers/platform/limits/)
 
 Resend requires an owned, verified sending domain before it will send reset email. Until that is configured, the in-site email reset cannot complete; the Cloudflare D1 reset procedure remains available. [Resend verified domains](https://resend.com/docs/dashboard/domains/introduction)

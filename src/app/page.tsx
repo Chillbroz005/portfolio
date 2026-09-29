@@ -212,6 +212,7 @@ export default function Home() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [settingsMessage, setSettingsMessage] = useState("");
   const [resetToken, setResetToken] = useState("");
+  const [resetMethod, setResetMethod] = useState<"choose" | "email" | "question">("choose");
   const [resetQuestion, setResetQuestion] = useState("");
   const [resetAnswer, setResetAnswer] = useState("");
   const [resetPassword, setResetPassword] = useState("");
@@ -250,7 +251,7 @@ export default function Home() {
     if (match) {
       const token = decodeURIComponent(match[1]);
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
-      setResetToken(token); setResetMode(true);
+      setResetToken(token); setResetMethod("email"); setResetMode(true);
       void apiJson("/api/auth/reset/challenge", { method: "POST", body: JSON.stringify({ token }) }).then(data => setResetQuestion(data.question || "")).catch(error => setResetMessage(error.message));
     }
   }, []);
@@ -368,13 +369,26 @@ export default function Home() {
   };
   const requestPasswordReset = async () => {
     setResetMessage("");
+    setResetMethod("email");
     try { await apiJson("/api/auth/reset/request", { method: "POST", body: JSON.stringify({}) }); setResetMessage("If email reset is configured, a reset link has been sent."); }
     catch (error: any) { setResetMessage(error.message); }
+  };
+  const chooseQuestionRecovery = async () => {
+    setResetMessage("");
+    try {
+      const data = await apiJson("/api/auth/reset/question");
+      setResetQuestion(data.question || "");
+      setResetMethod("question");
+    } catch (error: any) { setResetMessage(error.message); }
   };
   const completePasswordReset = async () => {
     setResetMessage("");
     if (resetPassword !== resetConfirmPassword) { setResetMessage("The passwords do not match."); return; }
-    try { await apiJson("/api/auth/reset/complete", { method: "POST", body: JSON.stringify({ token: resetToken, answer: resetAnswer, newPassword: resetPassword }) }); setResetMessage("Password reset. You can now sign in."); setResetMode(false); setResetToken(""); setResetAnswer(""); setResetPassword(""); setResetConfirmPassword(""); }
+    const path = resetToken ? "/api/auth/reset/complete" : "/api/auth/reset/security";
+    const body = resetToken
+      ? { token: resetToken, answer: resetAnswer, newPassword: resetPassword }
+      : { answer: resetAnswer, newPassword: resetPassword };
+    try { await apiJson(path, { method: "POST", body: JSON.stringify(body) }); setResetMessage("Password reset. You can now sign in."); setResetMode(false); setResetToken(""); setResetAnswer(""); setResetPassword(""); setResetConfirmPassword(""); }
     catch (error: any) { setResetMessage(error.message); }
   };
 
@@ -1311,17 +1325,18 @@ export default function Home() {
           <div style={{ textAlign: "center", marginBottom: "1.5rem" }}><Lock size={40} style={{ color: "var(--accent)", margin: "0 auto 10px" }} /><h2 style={{ fontSize: "24px", fontWeight: 900 }}>Editor Sign In</h2><p style={{ color: "var(--muted)", fontSize: "14px" }}>Your password is verified by the site server.</p></div>
           <input type="password" autoComplete="current-password" style={{ width: "100%", padding: "12px", background: "var(--bg)", border: "1px solid var(--accent)", borderRadius: "10px", color: "var(--text)" }} value={authPassword} placeholder="Admin password" onKeyDown={e => e.key === "Enter" && void handleAuthSubmit()} onChange={e => setAuthPassword(e.target.value)} />
           {authError && <p role="alert" style={{ color: "#ef4444", fontSize: "13px" }}>{authError}</p>}
-          <button className="forgot-key-link" type="button" onClick={() => { setShowAuthModal(false); setResetMode(true); setResetMessage("Enter the details from your password reset email."); void requestPasswordReset(); }}>Forgot password? Send reset email</button>
+          <button className="forgot-key-link" type="button" onClick={() => { setShowAuthModal(false); setResetMode(true); setResetMethod("choose"); setResetMessage(""); setResetToken(""); }}>Forgot password?</button>
           <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "1rem" }}><button className="secondary-btn" onClick={() => setShowAuthModal(false)}>Cancel</button><button className="primary-btn" onClick={() => void handleAuthSubmit()}>Sign In</button></div>
         </motion.div></div>}
       </AnimatePresence>
-      {/* Email gated password reset */}
+      {/* Password recovery by email or security question */}
       <AnimatePresence>
         {resetMode && <div className="modal-backdrop"><motion.div className="recruiter-modal" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
           <button className="modal-close" onClick={() => setResetMode(false)} aria-label="Close"><X size={18} /></button><span className="eyebrow">PASSWORD RECOVERY</span><h2 style={{ fontSize: "24px", fontWeight: 900, margin: "8px 0 12px" }}>Reset editor password</h2>
-          {!resetToken && <p style={{ color: "var(--muted)", fontSize: "13px" }}>A reset link will be sent to the configured email address.</p>}
-          {resetToken && <><p style={{ color: "var(--muted)", fontSize: "13px" }}>Email link verified. Answer the configured recovery question to continue.</p><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>{resetQuestion}<input type="password" autoComplete="off" value={resetAnswer} onChange={event => setResetAnswer(event.target.value)} /></label><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>New password<input type="password" autoComplete="new-password" value={resetPassword} onChange={event => setResetPassword(event.target.value)} /></label><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>Confirm new password<input type="password" autoComplete="new-password" value={resetConfirmPassword} onChange={event => setResetConfirmPassword(event.target.value)} /></label></>}
-          {resetMessage && <p role="status" style={{ color: "var(--muted)", fontSize: "13px", marginTop: "12px" }}>{resetMessage}</p>}<div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "1.5rem" }}><button className="secondary-btn" onClick={() => setResetMode(false)}>Close</button>{resetToken && <button className="primary-btn" onClick={() => void completePasswordReset()}>Reset Password</button>}</div>
+          {resetMethod === "choose" && !resetToken && <><p style={{ color: "var(--muted)", fontSize: "13px" }}>Choose how you want to recover your password.</p><div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "14px" }}><button className="secondary-btn" onClick={() => void requestPasswordReset()}>Send email reset link</button><button className="secondary-btn" onClick={() => void chooseQuestionRecovery()}>Use recovery question</button></div></>}
+          {resetMethod === "email" && !resetToken && <p style={{ color: "var(--muted)", fontSize: "13px" }}>A reset link will be sent to the configured email address.</p>}
+          {(resetToken || resetMethod === "question") && <><p style={{ color: "var(--muted)", fontSize: "13px" }}>{resetToken ? "Email link verified. Answer your recovery question to continue." : "Answer your recovery question to reset the password."}</p><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>{resetQuestion}<input type="password" autoComplete="off" value={resetAnswer} onChange={event => setResetAnswer(event.target.value)} /></label><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>New password<input type="password" autoComplete="new-password" value={resetPassword} onChange={event => setResetPassword(event.target.value)} /></label><label style={{ display: "grid", gap: "6px", marginTop: "12px" }}>Confirm new password<input type="password" autoComplete="new-password" value={resetConfirmPassword} onChange={event => setResetConfirmPassword(event.target.value)} /></label></>}
+          {resetMessage && <p role="status" style={{ color: "var(--muted)", fontSize: "13px", marginTop: "12px" }}>{resetMessage}</p>}<div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "1.5rem" }}><button className="secondary-btn" onClick={() => setResetMode(false)}>Close</button>{(resetToken || resetMethod === "question") && <button className="primary-btn" onClick={() => void completePasswordReset()}>Reset Password</button>}</div>
         </motion.div></div>}
       </AnimatePresence>
       {/* Server side editor settings */}

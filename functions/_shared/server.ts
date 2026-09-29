@@ -167,8 +167,8 @@ export async function revokeAllSessions(env: Env): Promise<void> {
   await env.DB.prepare("DELETE FROM admin_sessions").run();
 }
 
-export async function rateLimit(env: Env, request: Request, action: string, maxHits: number, windowSeconds: number): Promise<boolean> {
-  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+export async function rateLimit(env: Env, request: Request, action: string, maxHits: number, windowSeconds: number, subject?: string): Promise<boolean> {
+  const ip = subject || request.headers.get("CF-Connecting-IP") || "unknown";
   const key = `${action}:${await sha256Hex(ip)}`;
   const now = Math.floor(Date.now() / 1000);
   const windowStart = Math.floor(now / windowSeconds) * windowSeconds;
