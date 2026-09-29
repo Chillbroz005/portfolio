@@ -245,7 +245,7 @@ export default function Home() {
       keys.forEach((key, index) => { const value = localStorage.getItem(`sg_edited_${key}`); if (value) setters[index](JSON.parse(value)); });
       ["sg_github_token", "sg_auth_key", "sg_recovery_questions", "sg_recovery_code"].forEach(key => localStorage.removeItem(key));
     } catch {}
-    void apiJson("/api/auth/session").then(() => setIsEditor(true)).catch(() => setIsEditor(false));
+    void apiJson("/api/auth/session").then(data => setIsEditor(data.authenticated === true)).catch(() => setIsEditor(false));
     const match = window.location.hash.match(/^#reset=(.+)$/);
     if (match) {
       const token = decodeURIComponent(match[1]);
