@@ -13,6 +13,8 @@ Open `http://localhost:3000`. Local development does not include a configured D1
 
 ## Cloudflare Pages setup
 
+The public editor site is `https://suresh-ganesan.pages.dev`. Its Pages middleware forwards `/api/*` requests to the original `chillbroz005-portfolio` project, keeping the existing D1 sessions and server-only secrets in one place. Keep that backend project active. The `suresh-ganesan` project is deployed with Wrangler Direct Upload, so publish a new Pages deployment after source changes with `npx wrangler pages deploy ./out --project-name suresh-ganesan --branch main`.
+
 The previous editor passkey was embedded in client code and must be considered public. Choose a new, unique initial admin password; do not reuse the old passkey. This change removes it from the current source but does not rewrite existing Git history.
 
 1. Create a Pages project from the `Chillbroz005/portfolio` GitHub repository and the `main` branch. Use Node.js 22, build command `npm ci && npm run build`, and output directory `out`. The static export is built at the domain root. The Wrangler configuration names the project `chillbroz005-portfolio`; if that name is unavailable, update `wrangler.toml` and `SITE_ORIGIN` together.
