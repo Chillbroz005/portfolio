@@ -1,8 +1,8 @@
 export const profile = {
   "name": "Suresh Ganesan",
-  "title": "Senior Supply Chain / Procurement Professional",
-  "summary": "Procurement and Supply Chain professional with 9+ years of experience across manufacturing, fabrication projects, and International sourcing Experienced in strategic sourcing, technical and commercial procurement, CAPEX/OPEX, P2P, Contract management, vendor development, and project procurement.",
-  "tagline": "Procurement and Supply Chain professional with 9 years of experience across\nmanufacturing, fabrication projects, and international procurement. Experienced in\nstrategic sourcing, technical and commercial procurement, CAPEX/OPEX, P2P,\ncontract management, vendor development, and project procurement. Seeking to\ncontribute my cross-functional and international experience to drive cost efficiency,\nsupplier performance, and timely project execution while growing into a broader\nprocurement leadership role",
+  "title": "Senior Supply Chain & Procurement Professional",
+  "summary": "Procurement and Supply Chain professional with 9 years of experience across manufacturing, fabrication projects, and international procurement. Experienced in strategic sourcing, technical and commercial procurement, CAPEX/OPEX, P2P, contract management, vendor development, and project procurement. Seeking to contribute cross-functional and international experience to drive cost efficiency, supplier performance, and timely project execution while growing into a broader procurement leadership role.",
+  "tagline": "Procurement and Supply Chain professional with 9 years of experience across manufacturing, fabrication projects, and international procurement. Experienced in strategic sourcing, technical and commercial procurement, CAPEX/OPEX, P2P, contract management, vendor development, and project procurement. Seeking to contribute my cross-functional and international experience to drive cost efficiency, supplier performance, and timely project execution while growing into a broader procurement leadership role.",
   "location": "Chennai, Tamil Nadu, India",
   "email": "mailmesuresh005@gmail.com",
   "phones": [
@@ -15,12 +15,8 @@ export const profile = {
   "githubUsername": "Chillbroz005",
   "experienceYears": "9 years",
   "regions": [
-    "Hong Kong",
-    "Japan",
-    "Singapore",
-    "Australia",
-    "Saudi Arabia",
-    "Malaysia"
+    "India",
+    "Singapore"
   ],
   "industries": [
     "Manufacturing",
@@ -42,9 +38,9 @@ export const profile = {
     "Know Your Supplier (KYS)"
   ],
   "achievements": [
-    "Best Employee of the Year — 2019 & 2021",
-    "Gold Award — QCFI Kaizen Mela, Madurai chapter, 2018",
-    "Presented 35+ Kaizens in Loyal Group Kaizen competition"
+    "Best Employee 2019 & 2021",
+    "Gold Award, QCFI Kaizen Mela, Madurai Chapter 2018",
+    "Presented over 35 Kaizens in Loyal Group Kaizen competition"
   ]
 } as const;
 
@@ -78,7 +74,7 @@ export const experience: ExperienceItem[] = [
   },
   {
     "company": "FRANKLIN OFFSHORE INTERNATIONAL PTE LTD",
-    "role": "Procurement Engineer – Fabrication & Project Division",
+    "role": "Procurement Engineer - Fabrication & Project Division",
     "location": "Singapore",
     "dates": "May 2025 – May 2026",
     "startDate": "2025-05-15",
@@ -97,7 +93,7 @@ export const experience: ExperienceItem[] = [
   },
   {
     "company": "LOYAL TEXTILES MILLS LIMITED",
-    "role": "Assistant Manager – Purchase and Projects",
+    "role": "Assistant Manager - Purchase and Projects",
     "location": "Chennai, Tamil Nadu, India",
     "dates": "June 2017 – May 2025",
     "startDate": "2017-06-01",
@@ -117,37 +113,27 @@ export const experience: ExperienceItem[] = [
 ];
 
 export const engagements = [
-  "Modernization & Expansion Project (MEP) — 1800 Million",
-  "AOP (CAPEX & Civil projects) — 1200 Million",
-  "Naidupeta, AP plant fire-damage restoration project — 500 Million",
+  "MEP - 1800 Million",
+  "AOP CAPEX & Civil projects - 1200 Million",
+  "Naidupeta AP fire-damage restoration - 500 Million",
   "O&M contracts for Wartsila 12V32LN (4MW) & Kirloskar S.E.M.P.T Pielstic (2.5MW) gensets",
   "Guarding service agreement for AP Plant",
   "LOYAL Group AMC for weighing balance & swimming pool",
-  "Work order for PICONOL N.V — 17,27,700 EURO"
+  "PICONOL N.V work order - 17,27,700 EURO"
 ];
 
 export const skills = [
   "Supply Chain",
   "Strategic Sourcing",
-  "Technical Procurement",
-  "Commercial Procurement",
-  "CAPEX / OPEX",
-  "Procure-to-Pay (P2P)",
-  "Global Sourcing",
+  "Procurement",
+  "P2P",
+  "CAPEX/OPEX",
   "Vendor Management",
   "Contract Management",
-  "RFQ / RFP",
-  "Inventory Management / Optimization",
+  "RFI/RFQ/RFP",
+  "Global Sourcing",
   "MRP",
-  "Civil Contracts & Purchases",
-  "O&M & Manpower Contracts",
-  "IT Material & Software Licensing",
-  "MEP / Projects",
-  "MIS Reporting",
-  "Tender Evaluation",
-  "KYS / Vendor Compliance",
-  "ISO / QMS / EMS / OHSAS",
-  "5S / Kaizen"
+  "Inventory Optimization"
 ];
 
 export const software = [
@@ -192,65 +178,9 @@ export const education = [
 ];
 
 export const certifications = [
-  "Lean Six Sigma – Green Belt",
+  "Lean Six Sigma - Green Belt",
   "NDT",
   "PLC & SCADA"
 ];
 
-export const projects = [
-  {
-    "title": "Modernization & Expansion Project",
-    "category": "Procurement",
-    "description": "Procurement and project engagement documented in the resume.",
-    "technologies": [],
-    "github": ""
-  },
-  {
-    "title": "Fabrication & Project Procurement",
-    "category": "Procurement",
-    "description": "End-to-end procurement for fabrication projects, including PR-to-PO flow, vendor development, material coordination and documentation.",
-    "technologies": [
-      "P2P",
-      "RFQ/RFP",
-      "Vendor management"
-    ],
-    "github": ""
-  },
-  {
-    "title": "Notification Logger",
-    "category": "Android",
-    "description": "An Android app built in Kotlin that captures and logs all device notifications in real time. Runs as a background service and stores notification data locally — useful for auditing, monitoring and automation use cases across any installed app.",
-    "technologies": [
-      "Kotlin",
-      "Android",
-      "Notifications API",
-      "Background Service"
-    ],
-    "github": "https://github.com/Chillbroz005/Notification_Logger"
-  },
-  {
-    "title": "Group Guardian & Filter Bot",
-    "category": "Automation",
-    "description": "A Telegram bot that automates group chat moderation — filters spam and unwanted messages, manages member actions, and enforces rules without any manual intervention. Commercially deployed for real customer groups.",
-    "technologies": [
-      "Python",
-      "Telegram Bot API",
-      "Flask",
-      "Automation"
-    ],
-    "github": "https://github.com/Chillbroz005/Telegram-bot"
-  },
-  {
-    "title": "Personal Portfolio Website",
-    "category": "Other",
-    "description": "This portfolio — built from scratch using TypeScript and deployed via GitHub Pages. Dynamically loads GitHub repositories via the public API, features filterable project cards, an interactive career timeline, and a contact form. Demonstrates full front-end development capability alongside a professional procurement profile.",
-    "technologies": [
-      "TypeScript",
-      "GitHub Pages",
-      "GitHub API",
-      "HTML",
-      "CSS"
-    ],
-    "github": "https://github.com/Chillbroz005/portfolio"
-  }
-];
+export const projects = [];
